@@ -6,10 +6,10 @@ use crate::crypto;
 use crate::crypto::SensitivityLevel;
 
 use super::paths::store_path;
-use super::types::{load_store, save_store};
+use super::types::{Sensitivity, load_store, save_store};
 
-pub fn set(args: SetArgs, global: bool) -> Result<()> {
-    let path = store_path(global)?;
+pub fn set(mut args: SetArgs) -> Result<()> {
+    let path = store_path()?;
     let mut store = load_store(&path)?;
 
     let has_all_args = args.id.is_some() && !args.env.is_empty() && args.value.is_some();
@@ -27,82 +27,171 @@ pub fn set(args: SetArgs, global: bool) -> Result<()> {
             value
         };
 
-        let entry = store.entry(id.clone()).or_default();
+        let item = store.entry(id.clone()).or_default();
         for env in &args.env {
-            entry.insert(env.clone(), stored_value.clone());
+            item.values.insert(env.clone(), stored_value.clone());
         }
         save_store(&path, &store)?;
         println!("Set {id} for {}", args.env.join(", "));
     } else {
-        // Interactive mode
-        let id: String = if let Some(id) = args.id {
-            id
+        // Interactive mode — Escape on Select prompts goes back one step
+        let env_options = &["dev", "prod", "staging"];
+        let sensitivity_options = &["plaintext", "sensitive", "secret"];
+        let has_id = args.id.is_some();
+        let has_env = !args.env.is_empty();
+        let has_sensitivity = args.sensitive || args.secret;
+
+        // Steps that support back-navigation via Escape
+        #[derive(Clone, Copy)]
+        enum Step { Id, Env, Sensitivity, Value, Description, Origin, Tags, Done }
+
+        let first_step = if has_id && has_env {
+            Step::Sensitivity
+        } else if has_id {
+            Step::Env
         } else {
-            Input::new().with_prompt("Config item ID").interact_text()?
+            Step::Id
         };
 
-        let envs: Vec<String> = if args.env.is_empty() {
-            let env_options = &["dev", "prod", "staging"];
-            let selection = Select::new()
-                .with_prompt("Environment")
-                .items(env_options)
-                .default(0)
-                .interact()?;
-            vec![env_options[selection].to_string()]
-        } else {
-            args.env
-        };
+        let mut step = first_step;
+        let mut id: String = args.id.take().unwrap_or_default();
+        let mut envs: Vec<String> = args.env;
+        let mut level: Option<SensitivityLevel> = sensitivity_level_from_flags(args.sensitive, args.secret);
+        let mut stored_value = String::new();
+        let mut description: Option<String> = None;
+        let mut origin: Option<String> = None;
+        let mut tags: Vec<String>;
 
-        let level = if args.sensitive {
-            Some(SensitivityLevel::Sensitive)
-        } else if args.secret {
-            Some(SensitivityLevel::Secret)
-        } else {
-            let selection = Select::new()
-                .with_prompt("Sensitivity")
-                .items(["plaintext", "sensitive", "secret"])
-                .default(0)
-                .interact()?;
-            match selection {
-                1 => Some(SensitivityLevel::Sensitive),
-                2 => Some(SensitivityLevel::Secret),
-                _ => None,
+        loop {
+            match step {
+                Step::Id => {
+                    id = Input::new().with_prompt("Config item ID").interact_text()?;
+                    step = if has_env { Step::Sensitivity } else { Step::Env };
+                }
+                Step::Env => {
+                    let selection = Select::new()
+                        .with_prompt("Environment")
+                        .items(env_options)
+                        .default(0)
+                        .interact_opt()?;
+                    match selection {
+                        Some(i) => {
+                            envs = vec![env_options[i].to_string()];
+                            step = if has_sensitivity { Step::Value } else { Step::Sensitivity };
+                        }
+                        None => {
+                            if has_id { return Ok(()); }
+                            step = Step::Id;
+                        }
+                    }
+                }
+                Step::Sensitivity => {
+                    let selection = Select::new()
+                        .with_prompt("Sensitivity")
+                        .items(sensitivity_options)
+                        .default(0)
+                        .interact_opt()?;
+                    match selection {
+                        Some(i) => {
+                            level = match i {
+                                1 => Some(SensitivityLevel::Sensitive),
+                                2 => Some(SensitivityLevel::Secret),
+                                _ => None,
+                            };
+                            step = Step::Value;
+                        }
+                        None => {
+                            if has_env { return Ok(()); }
+                            step = Step::Env;
+                        }
+                    }
+                }
+                Step::Value => {
+                    let value: String = if let Some(v) = args.value.take() {
+                        v
+                    } else {
+                        Input::new().with_prompt("Value").interact_text()?
+                    };
+
+                    stored_value = if let Some(level) = level {
+                        crypto::encrypt_value(&value, level)?
+                    } else {
+                        value
+                    };
+
+                    step = Step::Description;
+                }
+                Step::Description => {
+                    let input: String = Input::new()
+                        .with_prompt("Description (optional, enter to skip)")
+                        .allow_empty(true)
+                        .interact_text()?;
+                    description = if input.is_empty() { None } else { Some(input) };
+                    step = Step::Origin;
+                }
+                Step::Origin => {
+                    let input: String = Input::new()
+                        .with_prompt("Origin (optional, enter to skip)")
+                        .allow_empty(true)
+                        .interact_text()?;
+                    origin = if input.is_empty() { None } else { Some(input) };
+                    step = Step::Tags;
+                }
+                Step::Tags => {
+                    let input: String = Input::new()
+                        .with_prompt("Tags (optional, comma-separated)")
+                        .allow_empty(true)
+                        .interact_text()?;
+                    tags = if input.is_empty() {
+                        Vec::new()
+                    } else {
+                        input.split(',').map(|s| s.trim().to_string()).collect()
+                    };
+
+                    // Save everything
+                    let item = store.entry(id.clone()).or_default();
+                    for env in &envs {
+                        item.values.insert(env.clone(), stored_value.clone());
+                    }
+                    if description.is_some() {
+                        item.description = description.take();
+                    }
+                    if origin.is_some() {
+                        item.origin = origin.take();
+                    }
+                    if !tags.is_empty() {
+                        item.tags = tags.clone();
+                    }
+                    if let Some(sens) = &level {
+                        item.sensitivity = Some(match sens {
+                            SensitivityLevel::Sensitive => Sensitivity::Sensitive,
+                            SensitivityLevel::Secret => Sensitivity::Secret,
+                        });
+                    }
+                    item.environments = envs.clone();
+
+                    save_store(&path, &store)?;
+                    println!("Set {id} for {}", envs.join(", "));
+                    step = Step::Done;
+                }
+                Step::Done => break,
             }
-        };
-
-        let value: String = if let Some(v) = args.value {
-            v
-        } else {
-            Input::new().with_prompt("Value").interact_text()?
-        };
-
-        let stored_value = if let Some(level) = level {
-            crypto::encrypt_value(&value, level)?
-        } else {
-            value
-        };
-
-        let entry = store.entry(id.clone()).or_default();
-        for env in &envs {
-            entry.insert(env.clone(), stored_value.clone());
         }
-        save_store(&path, &store)?;
-        println!("Set {id} for {}", envs.join(", "));
     }
 
     Ok(())
 }
 
-pub fn get(args: &GetArgs, global: bool) -> Result<()> {
-    let path = store_path(global)?;
+pub fn get(args: &GetArgs) -> Result<()> {
+    let path = store_path()?;
     let store = load_store(&path)?;
 
-    let env_values = store
+    let item = store
         .get(&args.id)
         .with_context(|| format!("item '{}' not found", args.id))?;
 
     let envs_to_show: Vec<&String> = if args.env.is_empty() {
-        env_values.keys().collect()
+        item.values.keys().collect()
     } else {
         args.env.iter().collect()
     };
@@ -110,7 +199,8 @@ pub fn get(args: &GetArgs, global: bool) -> Result<()> {
     let show_label = envs_to_show.len() > 1;
 
     for env in &envs_to_show {
-        let value = env_values
+        let value = item
+            .values
             .get(env.as_str())
             .with_context(|| format!("no value for env '{env}'"))?;
 
@@ -134,8 +224,8 @@ pub fn get(args: &GetArgs, global: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn list(args: &ListArgs, global: bool) -> Result<()> {
-    let path = store_path(global)?;
+pub fn list(args: &ListArgs) -> Result<()> {
+    let path = store_path()?;
     let store = load_store(&path)?;
 
     if store.is_empty() {
@@ -143,27 +233,29 @@ pub fn list(args: &ListArgs, global: bool) -> Result<()> {
         return Ok(());
     }
 
-    for (id, envs) in &store {
-        let filtered_envs: Vec<(&String, &String)> = if args.env.is_empty() {
-            envs.iter().collect()
+    for (id, item) in &store {
+        let filtered_values: Vec<(&String, &String)> = if args.env.is_empty() {
+            item.values.iter().collect()
         } else {
-            envs.iter()
+            item.values
+                .iter()
                 .filter(|(k, _)| args.env.contains(k))
                 .collect()
         };
 
-        if filtered_envs.is_empty() {
+        if filtered_values.is_empty() && item.values.is_empty() && item.description.is_none() {
             continue;
         }
 
-        let sensitivity = envs
+        let sensitivity = item
+            .values
             .values()
             .find_map(|v| crypto::parse_sensitivity(v));
         let marker = sensitivity
             .map_or_else(String::new, |level| format!(" [{}]", level.tag()));
 
         println!("{id}{marker}");
-        for (env, value) in &filtered_envs {
+        for (env, value) in &filtered_values {
             let display = if let Some(level) = crypto::parse_sensitivity(value) {
                 if args.reveal {
                     crypto::decrypt_value(value)?
@@ -180,8 +272,8 @@ pub fn list(args: &ListArgs, global: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn remove(args: &RemoveArgs, global: bool) -> Result<()> {
-    let path = store_path(global)?;
+pub fn remove(args: &RemoveArgs) -> Result<()> {
+    let path = store_path()?;
     let mut store = load_store(&path)?;
 
     if store.remove(&args.id).is_some() {
@@ -210,5 +302,5 @@ fn infer_sensitivity_level(
 ) -> Option<SensitivityLevel> {
     store
         .get(id)
-        .and_then(|envs| envs.values().find_map(|v| crypto::parse_sensitivity(v)))
+        .and_then(|item| item.values.values().find_map(|v| crypto::parse_sensitivity(v)))
 }

@@ -3,18 +3,29 @@ mod cli;
 mod crypto;
 mod paths;
 mod store;
+mod tui;
 
 use clap::Parser;
-use cli::{Cli, Command};
+use cli::{CatalogCommand, Cli, Command};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
-        Command::Set(args) => store::commands::set(args, cli.global)?,
-        Command::Get(ref args) => store::commands::get(args, cli.global)?,
-        Command::List(ref args) => store::commands::list(args, cli.global)?,
-        Command::Remove(ref args) => store::commands::remove(args, cli.global)?,
+    let Some(command) = cli.command else {
+        return tui::run();
+    };
+
+    match command {
+        Command::Set(args) => store::commands::set(args)?,
+        Command::Get(ref args) => store::commands::get(args)?,
+        Command::List(ref args) => store::commands::list(args)?,
+        Command::Remove(ref args) => store::commands::remove(args)?,
+        Command::Catalog(ref cmd) => match cmd {
+            CatalogCommand::Add(args) => catalog::commands::add(args)?,
+            CatalogCommand::Remove(args) => catalog::commands::remove(&args.id)?,
+            CatalogCommand::List(args) => catalog::commands::list(args)?,
+            CatalogCommand::Show(args) => catalog::commands::show(args)?,
+        },
         Command::Keys(ref cmd) => crypto::commands::keys(cmd)?,
         Command::Validate => catalog::commands::validate()?,
     }

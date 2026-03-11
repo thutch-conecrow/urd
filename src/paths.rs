@@ -15,30 +15,14 @@ pub fn urd_home() -> Result<PathBuf> {
         .map(|d| d.join("urd"))
 }
 
-pub fn global_store_path() -> Result<PathBuf> {
-    Ok(urd_home()?.join("store.yaml"))
-}
-
-pub fn local_store_path() -> PathBuf {
-    PathBuf::from(".urd").join("store.yaml")
-}
-
-pub fn store_path(global: bool) -> Result<PathBuf> {
-    if global {
-        global_store_path()
+pub fn store_path() -> Result<PathBuf> {
+    if std::env::var("URD_HOME").is_ok() {
+        Ok(urd_home()?.join("store.yaml"))
     } else {
-        Ok(local_store_path())
+        Ok(PathBuf::from(".urd").join("store.yaml"))
     }
 }
 
 pub fn identity_path() -> Result<PathBuf> {
     Ok(urd_home()?.join("keys").join("identity.key"))
-}
-
-pub fn global_catalog_path() -> Result<PathBuf> {
-    Ok(urd_home()?.join("catalog.yaml"))
-}
-
-pub fn local_catalog_path() -> PathBuf {
-    PathBuf::from(".urd").join("catalog.yaml")
 }

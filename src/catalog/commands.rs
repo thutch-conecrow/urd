@@ -1,72 +1,178 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
-use super::types::{Catalog, Sensitivity, load_catalog};
+use crate::cli::{CatalogAddArgs, CatalogListArgs, CatalogShowArgs};
 use crate::paths;
-use crate::store::types::{Store, load_store};
+use crate::store::types::{Sensitivity, load_store, save_store};
 
-pub fn validate() -> Result<()> {
-    let local_catalog = load_catalog(&paths::local_catalog_path())?;
-    let global_catalog = load_catalog(&paths::global_catalog_path()?)?;
+pub fn add(args: &CatalogAddArgs) -> Result<()> {
+    let path = paths::store_path()?;
+    let mut store = load_store(&path)?;
 
-    let local_store = load_store(&paths::store_path(false)?)?;
-    let global_store = load_store(&paths::store_path(true)?)?;
+    let item = store.entry(args.id.clone()).or_default();
 
-    let mut issues = Vec::new();
+    if let Some(ref desc) = args.description {
+        item.description = Some(desc.clone());
+    }
+    if let Some(ref sensitivity) = args.sensitivity {
+        item.sensitivity = Some(sensitivity.clone());
+    }
+    if let Some(ref origin) = args.origin {
+        item.origin = Some(origin.clone());
+    }
+    if !args.env.is_empty() {
+        item.environments = args.env.clone();
+    }
+    if !args.tag.is_empty() {
+        item.tags = args.tag.clone();
+    }
 
-    let catalogs: Vec<(&str, &Catalog)> =
-        vec![("local", &local_catalog), ("global", &global_catalog)];
-    for (source, catalog) in &catalogs {
-        for (id, item) in *catalog {
-            for env in &item.environments {
-                let env_keys: Vec<String> = if env == "all" {
-                    vec!["dev".to_string(), "prod".to_string()]
-                } else {
-                    vec![env.clone()]
-                };
+    save_store(&path, &store)?;
+    println!("Updated catalog entry for {}", args.id);
 
-                for e in &env_keys {
-                    let in_local: Option<&String> =
-                        local_store.get(id).and_then(|envs| envs.get(e));
-                    let in_global: Option<&String> =
-                        global_store.get(id).and_then(|envs| envs.get(e));
+    Ok(())
+}
 
-                    if in_local.is_none() && in_global.is_none() {
-                        issues.push(format!("MISSING: {id} [{e}] (defined in {source} catalog)"));
-                    }
+pub fn remove(id: &str) -> Result<()> {
+    let path = paths::store_path()?;
+    let mut store = load_store(&path)?;
 
-                    if let Some(value) = in_local.or(in_global) {
-                        let is_encrypted = value.starts_with("ENC[age,");
-                        let should_encrypt = matches!(
-                            item.sensitivity,
-                            Sensitivity::Sensitive | Sensitivity::Secret
-                        );
+    if store.remove(id).is_some() {
+        save_store(&path, &store)?;
+        println!("Removed {id}");
+    } else {
+        println!("Item '{id}' not found");
+    }
 
-                        if should_encrypt && !is_encrypted {
-                            issues.push(format!(
-                                "UNENCRYPTED: {id} [{e}] is {:?} but stored as plaintext",
-                                item.sensitivity
-                            ));
-                        }
-                    }
-                }
+    Ok(())
+}
+
+pub fn list(args: &CatalogListArgs) -> Result<()> {
+    let path = paths::store_path()?;
+    let store = load_store(&path)?;
+
+    if store.is_empty() {
+        println!("Store is empty.");
+        return Ok(());
+    }
+
+    for (id, item) in &store {
+        // Filter by environment
+        if !args.env.is_empty()
+            && !item.environments.iter().any(|e| args.env.contains(e))
+        {
+            continue;
+        }
+
+        // Filter by tag
+        if let Some(ref tag) = args.tag {
+            if !item.tags.contains(tag) {
+                continue;
             }
+        }
+
+        // Filter by sensitivity
+        if let Some(ref sensitivity) = args.sensitivity {
+            match &item.sensitivity {
+                Some(s) if s == sensitivity => {}
+                _ => continue,
+            }
+        }
+
+        let sens_label = item
+            .sensitivity
+            .as_ref()
+            .map_or(String::new(), |s| format!(" [{s:?}]"));
+
+        println!("{id}{sens_label}");
+        if let Some(ref desc) = item.description {
+            println!("  description: {desc}");
+        }
+        if let Some(ref origin) = item.origin {
+            println!("  origin: {origin}");
+        }
+        if !item.environments.is_empty() {
+            println!("  environments: {}", item.environments.join(", "));
+        }
+        if !item.tags.is_empty() {
+            println!("  tags: {}", item.tags.join(", "));
         }
     }
 
-    let stores: Vec<(&str, &Store)> = vec![("local", &local_store), ("global", &global_store)];
-    for (source, s) in &stores {
-        for id in s.keys() {
-            let in_local = local_catalog.contains_key(id);
-            let in_global = global_catalog.contains_key(id);
+    Ok(())
+}
 
-            if !in_local && !in_global {
-                issues.push(format!("ORPHANED: {id} (in {source} store but no catalog)"));
+pub fn show(args: &CatalogShowArgs) -> Result<()> {
+    let path = paths::store_path()?;
+    let store = load_store(&path)?;
+
+    let item = store
+        .get(&args.id)
+        .with_context(|| format!("item '{}' not found", args.id))?;
+
+    println!("{}", args.id);
+
+    if let Some(ref desc) = item.description {
+        println!("  description: {desc}");
+    }
+    if let Some(ref sensitivity) = item.sensitivity {
+        println!("  sensitivity: {sensitivity:?}");
+    }
+    if let Some(ref origin) = item.origin {
+        println!("  origin: {origin}");
+    }
+    if !item.environments.is_empty() {
+        println!("  environments: {}", item.environments.join(", "));
+    }
+    if !item.tags.is_empty() {
+        println!("  tags: {}", item.tags.join(", "));
+    }
+    if !item.values.is_empty() {
+        println!("  values:");
+        for (env, _value) in &item.values {
+            println!("    {env}: (set)");
+        }
+    }
+
+    Ok(())
+}
+
+pub fn validate() -> Result<()> {
+    let path = paths::store_path()?;
+    let store = load_store(&path)?;
+
+    let mut issues = Vec::new();
+
+    for (id, item) in &store {
+        // Check: item has expected environments but missing values
+        for env in &item.environments {
+            if !item.values.contains_key(env) {
+                issues.push(format!("MISSING: {id} [{env}] — declared but no value set"));
             }
+        }
+
+        // Check: sensitivity declared but values not encrypted
+        if matches!(
+            item.sensitivity,
+            Some(Sensitivity::Sensitive) | Some(Sensitivity::Secret)
+        ) {
+            for (env, value) in &item.values {
+                if !value.starts_with("ENC[age:") && !value.starts_with("ENC[age,") {
+                    issues.push(format!(
+                        "UNENCRYPTED: {id} [{env}] — declared {:?} but stored as plaintext",
+                        item.sensitivity.as_ref().unwrap()
+                    ));
+                }
+            }
+        }
+
+        // Check: has values but no description (incomplete catalog entry)
+        if !item.values.is_empty() && item.description.is_none() {
+            issues.push(format!("UNDOCUMENTED: {id} — has values but no description"));
         }
     }
 
     if issues.is_empty() {
-        println!("All catalog items are present and valid.");
+        println!("All items are valid.");
     } else {
         for issue in &issues {
             println!("{issue}");
