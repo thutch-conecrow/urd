@@ -12,11 +12,11 @@ pub fn set(mut args: SetArgs) -> Result<()> {
     let path = store_path()?;
     let mut store = load_store(&path)?;
 
-    let has_all_args = args.id.is_some() && !args.env.is_empty() && args.value.is_some();
-
-    if has_all_args {
-        let id = args.id.unwrap();
-        let value = args.value.unwrap();
+    if let (Some(id), Some(value), false) =
+        (args.id.as_deref(), args.value.as_deref(), args.env.is_empty())
+    {
+        let id = id.to_owned();
+        let value = value.to_owned();
 
         let level = sensitivity_level_from_flags(args.sensitive, args.secret)
             .or_else(|| infer_sensitivity_level(&store, &id));

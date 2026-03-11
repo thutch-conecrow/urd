@@ -137,10 +137,10 @@ pub struct CatalogShowArgs {
 
 #[derive(Subcommand)]
 pub enum KeysCommand {
-    /// Generate a new age keypair
+    /// Generate a new encryption key for this directory
     Init,
-    /// Show key status and public key
+    /// Show key status
     Status,
-    /// Export the public key
+    /// Export the encryption key (for sharing with team members)
     Export,
 }

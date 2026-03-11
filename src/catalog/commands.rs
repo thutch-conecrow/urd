@@ -151,15 +151,11 @@ pub fn validate() -> Result<()> {
         }
 
         // Check: sensitivity declared but values not encrypted
-        if matches!(
-            item.sensitivity,
-            Some(Sensitivity::Sensitive) | Some(Sensitivity::Secret)
-        ) {
+        if let Some(ref sens @ (Sensitivity::Sensitive | Sensitivity::Secret)) = item.sensitivity {
             for (env, value) in &item.values {
                 if !value.starts_with("ENC[age:") && !value.starts_with("ENC[age,") {
                     issues.push(format!(
-                        "UNENCRYPTED: {id} [{env}] — declared {:?} but stored as plaintext",
-                        item.sensitivity.as_ref().unwrap()
+                        "UNENCRYPTED: {id} [{env}] — declared {sens:?} but stored as plaintext",
                     ));
                 }
             }

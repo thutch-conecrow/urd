@@ -23,6 +23,21 @@ pub fn store_path() -> Result<PathBuf> {
     }
 }
 
-pub fn identity_path() -> Result<PathBuf> {
-    Ok(urd_home()?.join("keys").join("identity.key"))
+/// Path to the key-id file (lives alongside store.yaml).
+pub fn key_id_path() -> Result<PathBuf> {
+    if std::env::var("URD_HOME").is_ok() {
+        Ok(urd_home()?.join("key-id"))
+    } else {
+        Ok(PathBuf::from(".urd").join("key-id"))
+    }
+}
+
+/// Directory where key files are stored (global).
+pub fn keys_dir() -> Result<PathBuf> {
+    Ok(urd_home()?.join("keys"))
+}
+
+/// Path to a specific key file by ID.
+pub fn key_file_path(id: &str) -> Result<PathBuf> {
+    Ok(keys_dir()?.join(format!("{id}.key")))
 }

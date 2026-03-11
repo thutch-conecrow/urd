@@ -25,9 +25,18 @@ fn keys_init_creates_key() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Key generated"))
-        .stdout(predicate::str::contains("Public key:"));
+        .stdout(predicate::str::contains("Key file:"));
 
-    assert!(home.path().join("keys").join("identity.key").exists());
+    // key-id file should exist
+    assert!(home.path().join("key-id").exists());
+
+    // Read the key ID and verify the key file exists
+    let key_id = std::fs::read_to_string(home.path().join("key-id")).unwrap();
+    assert!(home
+        .path()
+        .join("keys")
+        .join(format!("{}.key", key_id.trim()))
+        .exists());
 }
 
 #[test]
@@ -40,7 +49,7 @@ fn keys_init_refuses_if_already_initialized() {
         .args(["keys", "init"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("key already exists"));
+        .stderr(predicate::str::contains("key already configured"));
 }
 
 #[test]
@@ -53,8 +62,8 @@ fn keys_status_shows_initialized() {
         .args(["keys", "status"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Key initialized"))
-        .stdout(predicate::str::contains("Public key:"));
+        .stdout(predicate::str::contains("Key ID:"))
+        .stdout(predicate::str::contains("(found)"));
 }
 
 #[test]
@@ -65,7 +74,7 @@ fn keys_status_shows_not_initialized() {
         .args(["keys", "status"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("No key found"));
+        .stdout(predicate::str::contains("No key configured"));
 }
 
 // -- list empty store --
