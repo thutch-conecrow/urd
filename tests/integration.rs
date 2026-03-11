@@ -1,3 +1,5 @@
+use std::fs;
+
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -468,4 +470,250 @@ fn sensitive_value_mutation_round_trips() {
         .assert()
         .success()
         .stdout(predicate::str::contains("(sensitive)"));
+}
+
+// -- assemble --
+
+/// Helper: write a file relative to work_dir, creating parent dirs as needed.
+fn write_file(work_dir: &TempDir, rel_path: &str, contents: &str) {
+    let path = work_dir.path().join(rel_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create parent dirs");
+    }
+    fs::write(&path, contents).expect("write file");
+}
+
+/// Helper: read a file relative to work_dir.
+fn read_file(work_dir: &TempDir, rel_path: &str) -> String {
+    fs::read_to_string(work_dir.path().join(rel_path)).expect("read file")
+}
+
+/// Set up a store with a few items and write topology + manifests for assembly tests.
+fn setup_assembly() -> (TempDir, TempDir) {
+    let (home, work) = setup();
+
+    // Init key
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Populate store
+    urd(&home, &work)
+        .args(["set", "app.url", "--env", "dev", "http://localhost:3000"])
+        .assert()
+        .success();
+    urd(&home, &work)
+        .args(["set", "app.url", "--env", "prod", "https://app.example.com"])
+        .assert()
+        .success();
+    urd(&home, &work)
+        .args(["set", "db.host", "--env", "dev", "localhost"])
+        .assert()
+        .success();
+    urd(&home, &work)
+        .args(["set", "db.host", "--env", "prod", "db.example.com"])
+        .assert()
+        .success();
+    urd(&home, &work)
+        .args(["set", "db.password", "--env", "dev", "--secret", "devpass"])
+        .assert()
+        .success();
+    urd(&home, &work)
+        .args(["set", "db.password", "--env", "prod", "--secret", "prodpass"])
+        .assert()
+        .success();
+
+    // Write topologies
+    write_file(
+        &work,
+        "topologies.yaml",
+        "\
+all-local:
+  api: dev
+  web: dev
+
+all-prod:
+  api: prod
+  web: prod
+
+hybrid:
+  api: dev
+  web: dev
+  overrides:
+    api:
+      db.*: prod
+
+with-path:
+  api:
+    env: dev
+    path: services/backend
+  web: dev
+",
+    );
+
+    // Write manifests
+    write_file(
+        &work,
+        "api/env.manifest.yaml",
+        "\
+target: \".env\"
+vars:
+  APP_URL: app.url
+  DB_HOST: db.host
+  DB_PASSWORD: db.password
+",
+    );
+
+    write_file(
+        &work,
+        "web/env.manifest.yaml",
+        "\
+target: \".env.local\"
+vars:
+  NEXT_PUBLIC_APP_URL: app.url
+",
+    );
+
+    (home, work)
+}
+
+#[test]
+fn assemble_all_local() {
+    let (home, work) = setup_assembly();
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Wrote api/.env (3 vars)"))
+        .stdout(predicate::str::contains("Wrote web/.env.local (1 vars)"));
+
+    let api_env = read_file(&work, "api/.env");
+    assert!(api_env.contains("APP_URL=http://localhost:3000"));
+    assert!(api_env.contains("DB_HOST=localhost"));
+    assert!(api_env.contains("DB_PASSWORD=devpass"));
+
+    let web_env = read_file(&work, "web/.env.local");
+    assert!(web_env.contains("NEXT_PUBLIC_APP_URL=http://localhost:3000"));
+}
+
+#[test]
+fn assemble_all_prod() {
+    let (home, work) = setup_assembly();
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-prod"])
+        .assert()
+        .success();
+
+    let api_env = read_file(&work, "api/.env");
+    assert!(api_env.contains("APP_URL=https://app.example.com"));
+    assert!(api_env.contains("DB_HOST=db.example.com"));
+    assert!(api_env.contains("DB_PASSWORD=prodpass"));
+}
+
+#[test]
+fn assemble_with_overrides() {
+    let (home, work) = setup_assembly();
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "hybrid"])
+        .assert()
+        .success();
+
+    let api_env = read_file(&work, "api/.env");
+    // app.url should be dev (not overridden)
+    assert!(api_env.contains("APP_URL=http://localhost:3000"));
+    // db.* should be overridden to prod
+    assert!(api_env.contains("DB_HOST=db.example.com"));
+    assert!(api_env.contains("DB_PASSWORD=prodpass"));
+
+    // web has no overrides — all dev
+    let web_env = read_file(&work, "web/.env.local");
+    assert!(web_env.contains("NEXT_PUBLIC_APP_URL=http://localhost:3000"));
+}
+
+#[test]
+fn assemble_single_component() {
+    let (home, work) = setup_assembly();
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "web"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Wrote web/.env.local"));
+
+    // web file written
+    assert!(work.path().join("web/.env.local").exists());
+    // api file NOT written
+    assert!(!work.path().join("api/.env").exists());
+}
+
+#[test]
+fn assemble_with_explicit_path() {
+    let (home, work) = setup_assembly();
+
+    // Write manifest at the custom path
+    write_file(
+        &work,
+        "services/backend/env.manifest.yaml",
+        "\
+target: \".env\"
+vars:
+  APP_URL: app.url
+  DB_HOST: db.host
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "with-path"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Wrote services/backend/.env"));
+
+    let env = read_file(&work, "services/backend/.env");
+    assert!(env.contains("APP_URL=http://localhost:3000"));
+    assert!(env.contains("DB_HOST=localhost"));
+}
+
+#[test]
+fn assemble_missing_topology_fails() {
+    let (home, work) = setup_assembly();
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "nonexistent"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("topology 'nonexistent' not found"));
+}
+
+#[test]
+fn assemble_missing_component_fails() {
+    let (home, work) = setup_assembly();
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "nope"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("component 'nope' not found"));
+}
+
+#[test]
+fn assemble_missing_store_item_fails() {
+    let (home, work) = setup_assembly();
+
+    // Manifest referencing an item that doesn't exist
+    write_file(
+        &work,
+        "api/env.manifest.yaml",
+        "\
+target: \".env\"
+vars:
+  MISSING: does.not.exist
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "api"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does.not.exist"));
 }

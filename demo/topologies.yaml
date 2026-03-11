@@ -1,0 +1,23 @@
+# Topology presets — each maps components to environments
+# Used with: urd assemble --topology <name>
+
+all-local:
+  api: dev
+  web: dev
+  worker: dev
+
+all-prod:
+  api: prod
+  web: prod
+  worker: prod
+
+# Local frontends and API, but pointing at prod Supabase
+hybrid:
+  api: dev
+  web: dev
+  worker: dev
+  overrides:
+    api:
+      supabase.*: prod
+    worker:
+      supabase.*: prod

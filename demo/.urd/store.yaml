@@ -1,0 +1,92 @@
+stripe.price_id.pro_monthly:
+  description: Stripe Price ID for Pro monthly plan
+  sensitivity: plaintext
+  origin: Stripe dashboard > Products > Pro Plan
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:stripe
+  - scope:billing
+  dev: price_test_pro_monthly_fake
+  prod: price_live_pro_monthly_fake
+stripe.publishable_key:
+  description: Stripe publishable key (safe for client-side)
+  sensitivity: sensitive
+  origin: Stripe dashboard > Developers > API keys
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:stripe
+  - scope:billing
+  dev: pk_test_fake51x8clkRqKz4nBVDt00M3hA00dfake
+  prod: ENC[aes:sensitive,p/Uk/WfPzYv3fsMeEg5E+v+KhXNSjy+4ND5v+X+r+9ArpkxC4pWxDSN+6p3UELn/oWRGotkJHA+L///Y6Mse+YQ8k1adbQ==]
+stripe.secret_key:
+  description: Stripe secret key (server-side only)
+  sensitivity: secret
+  origin: Stripe dashboard > Developers > API keys
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:stripe
+  - scope:billing
+  dev: ENC[aes:secret,6ZtEmBy/ANmvxjovfzjyGi7tTDMKhfaP/eRv8V61Osuo5QGBmaFxkJmg/6okB9NZ/1vgJDLVLKCpVhlMMtbLye4p4QXvAQ==]
+  prod: ENC[aes:secret,UcTVVLNvdgJutH7Khl4kD+jaOzxA2CSBwyzSlo+bfVXmENFQmWkckZp+MsrPOFj3DcbG6GwoYcbZDmSgopwQea0v1bSk6eU=]
+stripe.webhook_secret:
+  description: Stripe webhook endpoint signing secret
+  sensitivity: secret
+  origin: Stripe dashboard > Developers > Webhooks
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:stripe
+  - scope:billing
+  dev: ENC[aes:secret,qFoNbrJsHtroHWcBjSdINzYRfys8LZmdYUSDLXkLDgqL/NfnMaYeUBDNfwmTEwMT]
+  prod: ENC[aes:secret,c6jfMJR+t7at3rFt1SyDHa19Zj6xOe9PJ4la41u9GVss+++TBh6fvmc4kZRAUoVV]
+supabase.anon_key:
+  description: Supabase anonymous/public key
+  sensitivity: sensitive
+  origin: Supabase CLI (local) / Supabase dashboard > API
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:supabase
+  dev: ENC[aes:sensitive,4IgY+hEL6YDjHxBrbK2pjo0M/Qx5EcnrEEhngwBDa22czzT9mmHtm5HWKSCdB8hDalpXjW55vqeRAcmp8fxUSDtqIV0ok/CuIij577uajVXM4+g4kMPPfA==]
+  prod: ENC[aes:sensitive,fkrnSLrrzjJORi4U8YIOCy2JKGy1JlaYEPrL8pYEajwoL5i3dpLBhDLlxoPCH6n03Ft/wfFszwIROuu37RhPZi8r0jUb0K5XIKRA9NOLC7N8KGHmF0tm]
+supabase.database_url:
+  description: Postgres connection string
+  sensitivity: secret
+  origin: Supabase dashboard > Project Settings > Database
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:supabase
+  dev: ENC[aes:sensitive,bGB/vlQX/e1Bj3jU5yc3M3X4V2zurJEyJIcMVmsXio6kFFWZJY10nZp1YU9tI8G6YHensz0FruXWn3FJx662E7DvVeoreukGkiWGh8yGUK1BkLo=]
+  prod: ENC[aes:secret,j6ngJEAzZ/YD+wL0A0rzSYY12LJ/R5OpCYWr1z5aDqoG8qMjgC16j/tdP5vJttkSC5C/eZVvX/tglRBpIdGbOaOxLFrz0FIHFy1R4tsjEWmWgzu34z6AIG2UFq0pTX3YR2Upxg==]
+supabase.service_role_key:
+  description: Supabase service role key (full access, server-side only)
+  sensitivity: secret
+  origin: Supabase dashboard > Project Settings > API
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:supabase
+  dev: ENC[aes:secret,quNMN5ZjFqVC4zCD+GEnexvtXpsnrqbTO6AUeRMtYBhUrcSptkeaTLvLnZahMltbu4CNarLlHr60cJNb6PJBF2UpmVzR1ycDU62Fid6o3gs2X/xhvw20/UtUspA=]
+  prod: ENC[aes:secret,QQvNXwOXfmgbzDHbBr7zIDlu3oN7+nzsEHCtb+ETt4D+LTTodCMmS3vrr/JxTTLga5lS3d8GpNPFIkXE10kM+KaDbIY+rex4I15huvGkZKx3vZmeGlNv0g++uw==]
+supabase.url:
+  description: Supabase API URL
+  sensitivity: plaintext
+  origin: Supabase CLI (local) / Supabase dashboard
+  environments:
+  - dev
+  - prod
+  tags:
+  - vendor:supabase
+  dev: http://localhost:54321
+  prod: https://xyzproject.supabase.co

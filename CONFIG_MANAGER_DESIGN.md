@@ -1,6 +1,6 @@
 # urd — Project Design Document
 
-A CLI tool for managing configuration and secrets across multiple projects and environments. Built in Rust, using `age` encryption (via `rage`) for secure, git-native storage.
+A CLI tool for managing configuration and secrets across multiple projects and environments. Built in Rust, using AES-256-GCM symmetric encryption for secure, git-native storage.
 
 The name comes from Urð, the Norse Norn who tends the Well of Urd (Urðarbrunnr) — the source of truth that nourishes Yggdrasil. She represents "what has been established," fitting for a canonical config store.
 
@@ -63,12 +63,13 @@ The store file uses **selective encryption**: keys and structure remain in plain
 - **Human-readable** — the file structure serves as documentation
 - **Single-file** — no consistency problems between separate changelog and data files
 
-Encryption uses the **age** format via the **rage** Rust library:
-- `age` was designed by Filippo Valsorda (former Go crypto team at Google) as a modern replacement for GPG
-- Uses X25519 key exchange, ChaCha20-Poly1305 symmetric encryption, HKDF key derivation
-- Spec is public, small, and intentionally simple
-- `rage` is an interoperable Rust implementation by str4d (Zcash cryptography engineer)
-- No custom crypto — all encryption/decryption delegated to rage
+Encryption uses **AES-256-GCM** via the `aes-gcm` Rust crate:
+- Symmetric encryption — one shared key per project, no keypair management
+- 256-bit random key, 12-byte random nonce per encryption
+- Nonce prepended to ciphertext, then base64-encoded
+- Key stored outside the repo (`~/.config/urd/keys/<id>.key`), shared out-of-band
+- Key ID (random 8-char hex) stored in `.urd/key-id` and committed to the repo
+- No custom crypto — all encryption/decryption delegated to the `aes-gcm` crate (RustCrypto project)
 
 ## System Architecture
 
@@ -102,11 +103,11 @@ The store file format uses selective encryption: plaintext keys/structure, encry
 
 ```yaml
 paddle.personal_credit_5.product_id:
-  prod: ENC[age,data:abc123...]
+  prod: ENC[aes:secret,abc123...]
   dev: "pro_test_xyz"  # sandbox ID, not sensitive
 paddle.api_key:
-  prod: ENC[age,data:def456...]
-  dev: ENC[age,data:ghi789...]
+  prod: ENC[aes:secret,def456...]
+  dev: ENC[aes:sensitive,ghi789...]
 supabase.url:
   prod: "https://myproject.supabase.co"
   dev: "http://localhost:54321"
@@ -226,8 +227,8 @@ urd assemble --topology <name>   # generate .env files for all components
 urd assemble --component api     # generate for one component only
 
 # Key management
-urd keys init                    # generate a new age keypair
-urd keys export                  # export public key (for sharing)
+urd keys init                    # generate a new AES-256 key
+urd keys export                  # export key (for sharing out-of-band)
 ```
 
 ## Technology Choices
@@ -235,7 +236,7 @@ urd keys export                  # export public key (for sharing)
 | Concern | Choice | Rationale |
 |---------|--------|-----------|
 | Language | Rust | Fast, single binary, strong ecosystem for CLI tools |
-| Encryption | rage (age format) | Trusted format, Rust-native library, no custom crypto |
+| Encryption | aes-gcm (AES-256-GCM) | RustCrypto project, symmetric key, no keypair management |
 | CLI framework | TBD (clap, etc.) | |
 | TUI | TBD (ratatui, dialoguer, inquire, etc.) | For interactive provisioning flow |
 | File format | YAML or TOML | Human-readable, git-diffable, supports selective encryption |

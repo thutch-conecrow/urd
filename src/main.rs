@@ -1,3 +1,4 @@
+mod assembly;
 mod catalog;
 mod cli;
 mod crypto;
@@ -26,6 +27,7 @@ fn main() -> anyhow::Result<()> {
             CatalogCommand::List(args) => catalog::commands::list(args)?,
             CatalogCommand::Show(args) => catalog::commands::show(args)?,
         },
+        Command::Assemble(ref args) => assembly::commands::assemble(args)?,
         Command::Keys(ref cmd) => crypto::commands::keys(cmd)?,
         Command::Validate => catalog::commands::validate()?,
     }

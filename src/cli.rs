@@ -25,8 +25,20 @@ pub enum Command {
     /// Manage encryption keys
     #[command(subcommand)]
     Keys(KeysCommand),
+    /// Assemble .env files from a topology
+    Assemble(AssembleArgs),
     /// Validate items (completeness and consistency)
     Validate,
+}
+
+#[derive(Parser)]
+pub struct AssembleArgs {
+    /// Topology name from topologies.yaml
+    #[arg(short, long)]
+    pub topology: String,
+    /// Assemble only this component
+    #[arg(short, long)]
+    pub component: Option<String>,
 }
 
 #[derive(Parser)]
