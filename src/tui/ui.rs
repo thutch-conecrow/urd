@@ -69,8 +69,7 @@ fn item_warnings(item: &crate::store::types::Item) -> Vec<&'static str> {
         Some(crate::store::types::Sensitivity::Sensitive | crate::store::types::Sensitivity::Secret)
     ) {
         let has_unencrypted = item.values.values().any(|v| {
-            !v.starts_with("ENC[age:")
-                && !v.starts_with("ENC[age,")
+            crypto::parse_sensitivity(v).is_none()
         });
         if has_unencrypted {
             warnings.push("unencrypted");
@@ -211,10 +210,41 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                         !matches!(next, Row::EnvValue(nid, _) | Row::MissingEnv(nid, _) if nid == id)
                     });
                 let connector = if is_last { "  \u{2514} " } else { "  \u{251c} " };
-                Line::from(vec![Span::styled(
-                    format!("{connector}{env}: (missing)"),
-                    Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
-                )])
+
+                let is_editing = matches!(
+                    &app.mode,
+                    Mode::EditValue { item_id, env: edit_env, .. }
+                    if item_id == id && edit_env == env
+                );
+
+                if is_editing {
+                    let Mode::EditValue { ref input, .. } = app.mode else {
+                        unreachable!()
+                    };
+                    let before = &input.buffer[..input.cursor];
+                    let (cursor_ch, after) = if input.cursor < input.buffer.len() {
+                        let c = input.buffer[input.cursor..].chars().next().unwrap_or(' ');
+                        (c, &input.buffer[input.cursor + c.len_utf8()..])
+                    } else {
+                        (' ', "")
+                    };
+
+                    Line::from(vec![
+                        Span::styled(format!("{connector}{env}: "), style),
+                        Span::raw(before.to_string()),
+                        Span::styled(
+                            cursor_ch.to_string(),
+                            Style::default().bg(Color::White).fg(Color::Black),
+                        ),
+                        Span::raw(after.to_string()),
+                    ])
+                } else {
+                    let missing_style = style.fg(Color::Red).add_modifier(Modifier::DIM);
+                    Line::from(vec![Span::styled(
+                        format!("{connector}{env}: (missing)"),
+                        missing_style,
+                    )])
+                }
             }
         };
 
@@ -541,6 +571,8 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Span::raw(" reveal  "),
             Span::styled("e", Style::default().fg(Color::Yellow)),
             Span::raw(" edit  "),
+            Span::styled("v", Style::default().fg(Color::Yellow)),
+            Span::raw(" value  "),
             Span::styled("a", Style::default().fg(Color::Yellow)),
             Span::raw(" add  "),
             Span::styled("c", Style::default().fg(Color::Yellow)),

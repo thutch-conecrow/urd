@@ -33,6 +33,9 @@ urd set stripe.secret_key -e prod --secret sk_live_abc123
 # Or use interactive mode — walks you through every field
 urd set
 
+# Bulk import from an existing .env file
+urd import .env --env dev
+
 # View your store
 urd list
 urd get supabase.url
@@ -94,6 +97,31 @@ urd catalog show stripe.secret_key
 | `plaintext` | Raw text | Visible everywhere |
 | `sensitive` | `ENC[aes:sensitive,...]` | Redacted in `get`/`list`, revealed with `--reveal` |
 | `secret` | `ENC[aes:secret,...]` | Same redaction, signals higher classification |
+
+### Import
+
+Import loads values from an existing `.env` or YAML file into the store for a given environment in one shot — no need to `urd set` each key individually.
+
+```bash
+# From a .env file
+urd import .env --env dev
+
+# From YAML (auto-detected by extension)
+urd import config.yaml --env dev
+
+# From stdin
+cat .env | urd import - --env dev
+
+# Encrypt all imported values as secret
+urd import vendor-keys.env --env prod --secret
+
+# Don't overwrite keys that already exist
+urd import production.env --env prod --skip-existing
+```
+
+**Format auto-detection:** `.yaml`/`.yml` extensions are parsed as YAML (flat `key: value` string maps). Everything else is parsed as dotenv. Use `--format dotenv` or `--format yaml` to override.
+
+**Encryption priority per key:** explicit `--secret`/`--sensitive` flag > catalog metadata > plaintext. This means if an item is already marked `secret` in the catalog, its value is encrypted automatically even without `--secret`.
 
 ### Assembly
 
@@ -226,9 +254,31 @@ Reports items missing descriptions, sensitivity levels, or expected environment 
 
 ### TUI
 
-Run `urd` with no arguments to launch the interactive terminal UI. Browse items, search, edit values and metadata, add new items, clone existing ones, and undo/redo changes — all without leaving the terminal.
+Run `urd` with no arguments to launch the interactive terminal UI.
 
-## Demo
+| Key | Action |
+|-----|--------|
+| `j`/`k` | Navigate up/down |
+| `l`/`Enter` | Expand item |
+| `h` | Collapse item |
+| `+`/`-` | Expand/collapse all |
+| `e` | Edit (metadata on headers, value on env rows) |
+| `v` | Edit value (env rows and missing env rows) |
+| `a` | Add new item, or new env to existing item |
+| `c` | Clone value to another environment |
+| `d` | Delete item or env value |
+| `r` | Reveal/hide values for selected item |
+| `R` | Reveal/hide all values |
+| `/` | Search/filter |
+| `u` | Undo |
+| `Ctrl+r` | Redo |
+| `q`/`Esc` | Quit |
+
+Items with declared environments that have no stored values show red "(missing)" rows. Use `e` or `v` on these rows to set a value directly.
+
+## Demos
+
+### Assembly demo
 
 The `demo/` directory contains a working example simulating a monorepo with three components (api uses a template, web and worker use manifests), a pre-populated store with Supabase and Stripe config, and topology presets. The demo encryption key is included since all values are fake.
 
@@ -253,6 +303,28 @@ urd get supabase.url
 urd
 ```
 
+### Import demo
+
+The `demo-import/` directory shows how to bootstrap a store from existing config files. It contains four source files and the resulting store after importing them in sequence. Uses the same encryption key as the assembly demo.
+
+```bash
+cd demo-import
+
+# Copy the demo key into place (same key as demo/)
+mkdir -p ~/.config/urd/keys
+cp .urd/demo.key ~/.config/urd/keys/cc916f35.key
+
+# The store was built by running these four imports in order:
+urd import basics.env --env dev                          # plain app config
+urd import database.yaml --env dev                       # YAML format, auto-detected
+urd import vendor-keys.env --env dev --secret            # encrypt all values
+urd import production.env --env prod --skip-existing     # layer prod without clobbering
+
+# Inspect the result
+urd list
+urd get STRIPE_SECRET_KEY --env dev --reveal
+```
+
 ## CLI reference
 
 ```
@@ -263,6 +335,7 @@ urd set <id> -e <env> --secret <value>       Set an encrypted value
 urd get <id> [-e <env>] [--reveal]           Get a value
 urd list [-e <env>] [-t <tag>] [--reveal]    List items
 urd remove <id>                              Remove an item
+urd import <path> -e <env> [--secret] [--skip-existing]  Bulk import from file or stdin
 urd catalog add <id> [-d ...] [-s ...] ...   Add/update catalog metadata
 urd catalog list [-e ...] [-t ...] [-s ...]  List catalog entries
 urd catalog show <id>                        Show full item details

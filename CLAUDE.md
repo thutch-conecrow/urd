@@ -11,7 +11,7 @@ urd — a CLI config and secrets manager in Rust. Named after the Norse Norn who
 ```bash
 cargo check                          # type-check
 cargo clippy                         # lint (all+pedantic+nursery enabled)
-cargo test                           # run all tests (18 integration tests)
+cargo test                           # run all tests
 cargo test <test_name>               # run a single test
 cargo test <test_name> -- --nocapture  # run with stdout visible
 cargo run                            # launch TUI (reads .urd/store.yaml)
@@ -30,7 +30,7 @@ Single merged store: catalog metadata (description, sensitivity, origin, tags, e
 
 - **`store/`** — `Item` struct, `Store` type alias, YAML load/save, set/get/list/remove commands with interactive mode
 - **`catalog/`** — catalog metadata commands (add/remove/list/show) and validate
-- **`crypto/`** — `age` crate encryption/decryption, key management. Encrypted format: `ENC[age:sensitive,...]` or `ENC[age:secret,...]`. Legacy `ENC[age,...]` treated as sensitive
+- **`crypto/`** — AES-256-GCM encryption/decryption via `aes-gcm` crate, key management. Encrypted format: `ENC[aes:sensitive,...]` or `ENC[aes:secret,...]`
 - **`tui/`** — ratatui+crossterm TUI. `app.rs` (state, mutations, undo/redo), `ui.rs` (three-panel rendering), `input.rs` (mode-dispatched key handling), `mod.rs` (terminal setup, event loop)
 - **`cli.rs`** — clap derive definitions. `command` is `Option<Command>`; `None` launches TUI
 - **`paths.rs`** — path resolution. `URD_HOME` env var overrides defaults (used by integration tests)

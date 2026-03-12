@@ -29,6 +29,39 @@ pub enum Command {
     Assemble(AssembleArgs),
     /// Validate items (completeness and consistency)
     Validate,
+    /// Import values from a .env or YAML file
+    Import(ImportArgs),
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum Format {
+    Dotenv,
+    Yaml,
+}
+
+#[derive(Parser)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ImportArgs {
+    /// File path, or `-` for stdin
+    pub path: String,
+    /// Target environment
+    #[arg(short, long)]
+    pub env: String,
+    /// Encrypt all values as sensitive
+    #[arg(long, conflicts_with = "secret")]
+    pub sensitive: bool,
+    /// Encrypt all values as secret
+    #[arg(long)]
+    pub secret: bool,
+    /// Don't overwrite existing values
+    #[arg(long)]
+    pub skip_existing: bool,
+    /// Preview what would be imported without writing
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Force format (default: auto-detect from extension)
+    #[arg(long)]
+    pub format: Option<Format>,
 }
 
 #[derive(Parser)]

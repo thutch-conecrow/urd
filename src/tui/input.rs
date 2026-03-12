@@ -59,6 +59,9 @@ fn handle_browse(app: &mut App, key: KeyEvent) {
         // Edit
         KeyCode::Char('e') => app.initiate_edit(),
 
+        // Set value (explicit value edit, works on any row with an env)
+        KeyCode::Char('v') => app.initiate_edit_value_any(),
+
         // Add
         KeyCode::Char('a') => app.initiate_add(),
 

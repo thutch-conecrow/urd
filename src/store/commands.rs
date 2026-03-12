@@ -86,10 +86,18 @@ pub fn set(mut args: SetArgs) -> Result<()> {
                     }
                 }
                 Step::Sensitivity => {
+                    let default_idx = store
+                        .get(&id)
+                        .and_then(|item| item.sensitivity.as_ref())
+                        .map_or(0, |s| match s {
+                            Sensitivity::Plaintext => 0,
+                            Sensitivity::Sensitive => 1,
+                            Sensitivity::Secret => 2,
+                        });
                     let selection = Select::new()
                         .with_prompt("Sensitivity")
                         .items(sensitivity_options)
-                        .default(0)
+                        .default(default_idx)
                         .interact_opt()?;
                     match selection {
                         Some(i) => {
@@ -296,11 +304,18 @@ const fn sensitivity_level_from_flags(sensitive: bool, secret: bool) -> Option<S
     }
 }
 
-fn infer_sensitivity_level(
+pub fn infer_sensitivity_level(
     store: &super::types::Store,
     id: &str,
 ) -> Option<SensitivityLevel> {
-    store
-        .get(id)
-        .and_then(|item| item.values.values().find_map(|v| crypto::parse_sensitivity(v)))
+    store.get(id).and_then(|item| {
+        item.sensitivity
+            .as_ref()
+            .and_then(Sensitivity::to_sensitivity_level)
+            .or_else(|| {
+                item.values
+                    .values()
+                    .find_map(|v| crypto::parse_sensitivity(v))
+            })
+    })
 }

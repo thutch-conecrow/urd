@@ -1,0 +1,33 @@
+APP_DEBUG:
+  dev: 'true'
+  prod: 'false'
+APP_NAME:
+  dev: my-app
+  prod: my-app
+APP_PORT:
+  dev: '3000'
+  prod: '8080'
+APP_URL:
+  dev: http://localhost:3000
+  prod: https://app.example.com
+DB_HOST:
+  dev: localhost
+  prod: db.example.com
+DB_NAME:
+  dev: myapp_dev
+  prod: myapp_prod
+DB_PASSWORD:
+  dev: local_dev_password
+  prod: real_prod_password_here
+DB_PORT:
+  dev: '5432'
+  prod: '5432'
+DB_USER:
+  dev: postgres
+  prod: app_service
+SENDGRID_API_KEY:
+  dev: ENC[aes:secret,IrmgeXmb5x7hA0LlcIiPsiex2bIdearyXzs8g16rT+grUD4xbJSZtzqpF4/nma6FslBmvsU=]
+SENTRY_DSN:
+  dev: ENC[aes:secret,E6gDJ77RX463gOBp4iSayfPfJ4u5WlCKMlY3o1bsTcJ+1xrhR0n7FP49X7F+VQLraxu/HYVqZX5IbegxbiwIFhI1]
+STRIPE_SECRET_KEY:
+  dev: ENC[aes:secret,9CbjipRzWFH20O8XkfMGogQQJIwYA3nfVutLCcv053BRv+QB7VfRLxf0DsxYqxwv6A5SLVp/EEA=]

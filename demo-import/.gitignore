@@ -1,0 +1,2 @@
+# Override root .gitignore — demo store is committed (fake values only)
+!.urd/

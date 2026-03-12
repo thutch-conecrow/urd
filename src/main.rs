@@ -2,6 +2,7 @@ mod assembly;
 mod catalog;
 mod cli;
 mod crypto;
+mod import;
 mod paths;
 mod store;
 mod tui;
@@ -30,6 +31,7 @@ fn main() -> anyhow::Result<()> {
         Command::Assemble(ref args) => assembly::commands::assemble(args)?,
         Command::Keys(ref cmd) => crypto::commands::keys(cmd)?,
         Command::Validate => catalog::commands::validate()?,
+        Command::Import(ref args) => import::commands::import(args)?,
     }
 
     Ok(())

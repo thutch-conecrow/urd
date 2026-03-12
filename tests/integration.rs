@@ -718,6 +718,96 @@ vars:
         .stderr(predicate::str::contains("does.not.exist"));
 }
 
+// -- catalog sensitivity inference on set --
+
+#[test]
+fn set_infers_encryption_from_catalog_secret() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Mark item as secret via catalog
+    urd(&home, &work)
+        .args(["catalog", "add", "db.password", "--sensitivity", "secret"])
+        .assert()
+        .success();
+
+    // Set without --secret flag — should auto-encrypt based on catalog
+    urd(&home, &work)
+        .args(["set", "db.password", "--env", "dev", "hunter2"])
+        .assert()
+        .success();
+
+    // Value should be redacted (encrypted)
+    urd(&home, &work)
+        .args(["get", "db.password", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(secret)"));
+
+    // Reveal should show the original value
+    urd(&home, &work)
+        .args(["get", "db.password", "--env", "dev", "--reveal"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hunter2"));
+}
+
+#[test]
+fn set_with_catalog_plaintext_stores_plaintext() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Mark item as plaintext via catalog
+    urd(&home, &work)
+        .args(["catalog", "add", "app.url", "--sensitivity", "plaintext"])
+        .assert()
+        .success();
+
+    // Set without flags — should stay plaintext
+    urd(&home, &work)
+        .args(["set", "app.url", "--env", "dev", "http://localhost:3000"])
+        .assert()
+        .success();
+
+    // Value should be shown as-is (not encrypted)
+    urd(&home, &work)
+        .args(["get", "app.url", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("http://localhost:3000"));
+}
+
+#[test]
+fn set_explicit_flag_overrides_catalog_sensitivity() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Mark item as sensitive via catalog
+    urd(&home, &work)
+        .args(["catalog", "add", "api.key", "--sensitivity", "sensitive"])
+        .assert()
+        .success();
+
+    // Set with explicit --secret flag — should override catalog's sensitive
+    urd(&home, &work)
+        .args(["set", "api.key", "--env", "dev", "--secret", "sk_abc123"])
+        .assert()
+        .success();
+
+    // Should be stored as secret, not sensitive
+    urd(&home, &work)
+        .args(["get", "api.key", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(secret)"));
+
+    urd(&home, &work)
+        .args(["get", "api.key", "--env", "dev", "--reveal"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sk_abc123"));
+}
+
 // -- assemble with templates --
 
 #[test]
@@ -928,4 +1018,316 @@ APP_URL={{ app.url }}
 
     let env = read_file(&work, "web/.env.local");
     assert!(env.contains("APP_URL=http://localhost:3000"));
+}
+
+// -- import --
+
+#[test]
+fn import_dotenv_file() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    write_file(
+        &work,
+        "app.env",
+        "\
+# Database config
+DB_HOST=localhost
+DB_PORT=5432
+APP_URL=\"http://localhost:3000\"
+EMPTY_VAL=
+",
+    );
+
+    urd(&home, &work)
+        .args(["import", work.path().join("app.env").to_str().unwrap(), "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Imported 4 items into dev"));
+
+    urd(&home, &work)
+        .args(["get", "DB_HOST", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("localhost"));
+
+    urd(&home, &work)
+        .args(["get", "DB_PORT", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("5432"));
+
+    // Quotes should be stripped
+    urd(&home, &work)
+        .args(["get", "APP_URL", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("http://localhost:3000"));
+
+    // Empty value
+    urd(&home, &work)
+        .args(["get", "EMPTY_VAL", "--env", "dev"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn import_yaml_file() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    write_file(
+        &work,
+        "config.yaml",
+        "\
+DATABASE_URL: postgres://localhost/mydb
+API_KEY: sk_test_123
+",
+    );
+
+    urd(&home, &work)
+        .args(["import", work.path().join("config.yaml").to_str().unwrap(), "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Imported 2 items into dev"));
+
+    urd(&home, &work)
+        .args(["get", "DATABASE_URL", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("postgres://localhost/mydb"));
+
+    urd(&home, &work)
+        .args(["get", "API_KEY", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sk_test_123"));
+}
+
+#[test]
+fn import_from_stdin() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    urd(&home, &work)
+        .args(["import", "-", "--env", "dev"])
+        .write_stdin("MY_KEY=my_value\nOTHER=123\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Imported 2 items into dev"));
+
+    urd(&home, &work)
+        .args(["get", "MY_KEY", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("my_value"));
+}
+
+#[test]
+fn import_skip_existing() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Pre-populate a value
+    urd(&home, &work)
+        .args(["set", "DB_HOST", "--env", "dev", "original"])
+        .assert()
+        .success();
+
+    write_file(
+        &work,
+        "new.env",
+        "\
+DB_HOST=overwritten
+DB_PORT=5432
+",
+    );
+
+    urd(&home, &work)
+        .args([
+            "import",
+            work.path().join("new.env").to_str().unwrap(),
+            "--env", "dev",
+            "--skip-existing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 skipped"));
+
+    // Original value preserved
+    urd(&home, &work)
+        .args(["get", "DB_HOST", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("original"));
+
+    // New value imported
+    urd(&home, &work)
+        .args(["get", "DB_PORT", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("5432"));
+}
+
+#[test]
+fn import_secret_encrypts_all() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    write_file(
+        &work,
+        "secrets.env",
+        "\
+API_KEY=sk_live_abc
+DB_PASSWORD=hunter2
+",
+    );
+
+    urd(&home, &work)
+        .args([
+            "import",
+            work.path().join("secrets.env").to_str().unwrap(),
+            "--env", "prod",
+            "--secret",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Imported 2 items into prod"));
+
+    // Both values should be encrypted as secret
+    urd(&home, &work)
+        .args(["get", "API_KEY", "--env", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(secret)"));
+
+    urd(&home, &work)
+        .args(["get", "DB_PASSWORD", "--env", "prod", "--reveal"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hunter2"));
+}
+
+#[test]
+fn import_respects_catalog_sensitivity() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Mark item as secret via catalog
+    urd(&home, &work)
+        .args(["catalog", "add", "DB_PASSWORD", "--sensitivity", "secret"])
+        .assert()
+        .success();
+
+    write_file(
+        &work,
+        "vals.env",
+        "\
+DB_PASSWORD=hunter2
+APP_PORT=3000
+",
+    );
+
+    urd(&home, &work)
+        .args(["import", work.path().join("vals.env").to_str().unwrap(), "--env", "dev"])
+        .assert()
+        .success();
+
+    // DB_PASSWORD should be encrypted (from catalog)
+    urd(&home, &work)
+        .args(["get", "DB_PASSWORD", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(secret)"));
+
+    // APP_PORT should be plaintext
+    urd(&home, &work)
+        .args(["get", "APP_PORT", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3000"));
+}
+
+#[test]
+fn import_dry_run_does_not_write() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    write_file(
+        &work,
+        "app.env",
+        "\
+DB_HOST=localhost
+DB_PORT=5432
+",
+    );
+
+    urd(&home, &work)
+        .args([
+            "import",
+            work.path().join("app.env").to_str().unwrap(),
+            "--env", "dev",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dry run"))
+        .stdout(predicate::str::contains("DB_HOST=localhost"))
+        .stdout(predicate::str::contains("DB_PORT=5432"));
+
+    // Store should still be empty
+    urd(&home, &work)
+        .args(["list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Store is empty"));
+}
+
+#[test]
+fn import_dry_run_shows_skip_and_encrypt() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Pre-populate a value
+    urd(&home, &work)
+        .args(["set", "DB_HOST", "--env", "dev", "original"])
+        .assert()
+        .success();
+
+    write_file(
+        &work,
+        "mixed.env",
+        "\
+DB_HOST=overwritten
+API_KEY=secret123
+",
+    );
+
+    urd(&home, &work)
+        .args([
+            "import",
+            work.path().join("mixed.env").to_str().unwrap(),
+            "--env", "dev",
+            "--skip-existing",
+            "--secret",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skip"))
+        .stdout(predicate::str::contains("encrypt"))
+        .stdout(predicate::str::contains("dry run"));
+
+    // Original value should be untouched
+    urd(&home, &work)
+        .args(["get", "DB_HOST", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("original"));
+
+    // API_KEY should not exist (dry run)
+    urd(&home, &work)
+        .args(["get", "API_KEY", "--env", "dev"])
+        .assert()
+        .failure();
 }

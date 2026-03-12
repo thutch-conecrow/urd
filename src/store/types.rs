@@ -15,6 +15,16 @@ pub enum Sensitivity {
     Secret,
 }
 
+impl Sensitivity {
+    pub const fn to_sensitivity_level(&self) -> Option<crate::crypto::SensitivityLevel> {
+        match self {
+            Self::Plaintext => None,
+            Self::Sensitive => Some(crate::crypto::SensitivityLevel::Sensitive),
+            Self::Secret => Some(crate::crypto::SensitivityLevel::Secret),
+        }
+    }
+}
+
 /// A single urd item: catalog metadata + per-environment values.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Item {

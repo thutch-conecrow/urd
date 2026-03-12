@@ -508,7 +508,14 @@ impl App {
         match self.selected_row() {
             Some(Row::ItemHeader(_)) => self.initiate_edit_metadata(),
             Some(Row::EnvValue(_, _)) => self.initiate_edit_value(),
-            Some(Row::MissingEnv(_, _)) | None => {}
+            Some(Row::MissingEnv(id, env)) => {
+            self.mode = Mode::EditValue {
+                item_id: id.clone(),
+                env: env.clone(),
+                input: InputState::new(""),
+            };
+        }
+        None => {}
         }
     }
 
@@ -596,6 +603,21 @@ impl App {
         Ok(())
     }
 
+    /// Enter edit-value mode for any row that has an environment (EnvValue or MissingEnv).
+    pub fn initiate_edit_value_any(&mut self) {
+        match self.selected_row() {
+            Some(Row::EnvValue(_, _)) => self.initiate_edit_value(),
+            Some(Row::MissingEnv(id, env)) => {
+                self.mode = Mode::EditValue {
+                    item_id: id.clone(),
+                    env: env.clone(),
+                    input: InputState::new(""),
+                };
+            }
+            Some(Row::ItemHeader(_)) | None => {}
+        }
+    }
+
     /// Enter edit mode for the currently selected env value.
     fn initiate_edit_value(&mut self) {
         let Some(Row::EnvValue(id, env)) = self.selected_row() else {
@@ -641,14 +663,19 @@ impl App {
 
         self.push_undo();
 
-        // Re-encrypt if the original value was encrypted
+        // Re-encrypt: check catalog sensitivity first, then fall back to existing encrypted value
         let stored_value = if let Some(item) = self.store.get(&item_id) {
-            if let Some(old_value) = item.values.get(&env) {
-                if let Some(level) = crate::crypto::parse_sensitivity(old_value) {
-                    crate::crypto::encrypt_value(&new_value, level)?
-                } else {
-                    new_value
-                }
+            let level = item
+                .sensitivity
+                .as_ref()
+                .and_then(crate::store::types::Sensitivity::to_sensitivity_level)
+                .or_else(|| {
+                    item.values
+                        .get(&env)
+                        .and_then(|v| crate::crypto::parse_sensitivity(v))
+                });
+            if let Some(level) = level {
+                crate::crypto::encrypt_value(&new_value, level)?
             } else {
                 new_value
             }
@@ -661,6 +688,7 @@ impl App {
         }
 
         save_store(&self.store_path, &self.store)?;
+        self.rebuild_rows();
         self.status_message = Some(format!("Updated {env} for {item_id}"));
         self.mode = Mode::Browse;
         Ok(())
@@ -728,7 +756,7 @@ impl App {
     /// Initiate add mode based on context.
     pub fn initiate_add(&mut self) {
         match self.selected_row() {
-            Some(Row::EnvValue(id, _)) => {
+            Some(Row::EnvValue(id, _) | Row::MissingEnv(id, _)) => {
                 // Add a new env to this existing item
                 self.mode = Mode::AddEnv {
                     item_id: id.clone(),
@@ -885,9 +913,18 @@ impl App {
 
                 self.push_undo();
 
-                // Encrypt if the item has a sensitivity level
+                // Encrypt: check catalog sensitivity first, then fall back to existing encrypted values
                 let stored_value = if let Some(item) = self.store.get(&item_id) {
-                    if let Some(level) = item.values.values().find_map(|v| crate::crypto::parse_sensitivity(v)) {
+                    let level = item
+                        .sensitivity
+                        .as_ref()
+                        .and_then(crate::store::types::Sensitivity::to_sensitivity_level)
+                        .or_else(|| {
+                            item.values
+                                .values()
+                                .find_map(|v| crate::crypto::parse_sensitivity(v))
+                        });
+                    if let Some(level) = level {
                         crate::crypto::encrypt_value(&val, level)?
                     } else {
                         val
