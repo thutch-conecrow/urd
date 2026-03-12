@@ -717,3 +717,215 @@ vars:
         .failure()
         .stderr(predicate::str::contains("does.not.exist"));
 }
+
+// -- assemble with templates --
+
+#[test]
+fn assemble_template_basic() {
+    let (home, work) = setup_assembly();
+
+    // Remove manifest, add template instead
+    fs::remove_file(work.path().join("api/env.manifest.yaml")).unwrap();
+    write_file(
+        &work,
+        "api/.env.template",
+        "\
+NODE_ENV=dev
+PORT=3000
+HOST=0.0.0.0
+
+# Database
+DB_HOST={{ db.host }}
+DB_PASSWORD={{ db.password }}
+
+# App
+APP_URL={{ app.url }}
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "api"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Wrote api/.env"));
+
+    let env = read_file(&work, "api/.env");
+    // Static lines preserved
+    assert!(env.contains("NODE_ENV=dev"));
+    assert!(env.contains("PORT=3000"));
+    assert!(env.contains("HOST=0.0.0.0"));
+    // Comments preserved
+    assert!(env.contains("# Database"));
+    assert!(env.contains("# App"));
+    // Blank line preserved
+    assert!(env.contains("\n\n"));
+    // Expressions resolved
+    assert!(env.contains("DB_HOST=localhost"));
+    assert!(env.contains("DB_PASSWORD=devpass"));
+    assert!(env.contains("APP_URL=http://localhost:3000"));
+}
+
+#[test]
+fn assemble_template_with_frontmatter_target() {
+    let (home, work) = setup_assembly();
+
+    fs::remove_file(work.path().join("web/env.manifest.yaml")).unwrap();
+    write_file(
+        &work,
+        "web/.env.template",
+        "\
+# target: .env.local
+NEXT_PUBLIC_APP_URL={{ app.url }}
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "web"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Wrote web/.env.local"));
+
+    let env = read_file(&work, "web/.env.local");
+    assert!(env.contains("NEXT_PUBLIC_APP_URL=http://localhost:3000"));
+    // Frontmatter line should not appear in output
+    assert!(!env.contains("# target:"));
+}
+
+#[test]
+fn assemble_template_with_overrides() {
+    let (home, work) = setup_assembly();
+
+    fs::remove_file(work.path().join("api/env.manifest.yaml")).unwrap();
+    write_file(
+        &work,
+        "api/.env.template",
+        "\
+APP_URL={{ app.url }}
+DB_HOST={{ db.host }}
+DB_PASSWORD={{ db.password }}
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "hybrid", "--component", "api"])
+        .assert()
+        .success();
+
+    let env = read_file(&work, "api/.env");
+    // app.url stays dev
+    assert!(env.contains("APP_URL=http://localhost:3000"));
+    // db.* overridden to prod
+    assert!(env.contains("DB_HOST=db.example.com"));
+    assert!(env.contains("DB_PASSWORD=prodpass"));
+}
+
+#[test]
+fn assemble_template_missing_item_fails() {
+    let (home, work) = setup_assembly();
+
+    fs::remove_file(work.path().join("api/env.manifest.yaml")).unwrap();
+    write_file(
+        &work,
+        "api/.env.template",
+        "\
+MISSING={{ does.not.exist }}
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "api"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does.not.exist"));
+}
+
+#[test]
+fn assemble_allow_missing_continues() {
+    let (home, work) = setup_assembly();
+
+    fs::remove_file(work.path().join("api/env.manifest.yaml")).unwrap();
+    write_file(
+        &work,
+        "api/.env.template",
+        "\
+APP_URL={{ app.url }}
+MISSING={{ does.not.exist }}
+",
+    );
+
+    urd(&home, &work)
+        .args([
+            "assemble",
+            "--topology",
+            "all-local",
+            "--component",
+            "api",
+            "--allow-missing",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("warning"));
+
+    let env = read_file(&work, "api/.env");
+    assert!(env.contains("APP_URL=http://localhost:3000"));
+    // Missing value written as empty
+    assert!(env.contains("MISSING="));
+}
+
+#[test]
+fn assemble_allow_missing_with_manifest() {
+    let (home, work) = setup_assembly();
+
+    write_file(
+        &work,
+        "api/env.manifest.yaml",
+        "\
+target: \".env\"
+vars:
+  APP_URL: app.url
+  MISSING: does.not.exist
+",
+    );
+
+    urd(&home, &work)
+        .args([
+            "assemble",
+            "--topology",
+            "all-local",
+            "--component",
+            "api",
+            "--allow-missing",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("warning"));
+
+    let env = read_file(&work, "api/.env");
+    assert!(env.contains("APP_URL=http://localhost:3000"));
+    assert!(env.contains("MISSING="));
+}
+
+#[test]
+fn assemble_env_template_discovery() {
+    let (home, work) = setup_assembly();
+
+    // Remove manifest, use env.template (not .env.template)
+    fs::remove_file(work.path().join("web/env.manifest.yaml")).unwrap();
+    write_file(
+        &work,
+        "web/env.template",
+        "\
+# target: .env.local
+APP_URL={{ app.url }}
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "web"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Wrote web/.env.local"));
+
+    let env = read_file(&work, "web/.env.local");
+    assert!(env.contains("APP_URL=http://localhost:3000"));
+}

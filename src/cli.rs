@@ -39,6 +39,9 @@ pub struct AssembleArgs {
     /// Assemble only this component
     #[arg(short, long)]
     pub component: Option<String>,
+    /// Continue on missing store values (writes empty value instead of erroring)
+    #[arg(long)]
+    pub allow_missing: bool,
 }
 
 #[derive(Parser)]

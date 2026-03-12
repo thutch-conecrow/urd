@@ -97,18 +97,38 @@ urd catalog show stripe.secret_key
 
 ### Assembly
 
-Assembly generates `.env` files by resolving component manifests against the store through a topology.
+Assembly generates `.env` files by resolving component definitions against the store through a topology. Components can use either **templates** or **manifests** — assembly discovers whichever is present.
 
-**Component manifests** live alongside each component and declare which store items map to which env vars:
+#### Templates
 
-```yaml
-# api/env.manifest.yaml
-target: ".env"
-vars:
-  DATABASE_URL: supabase.database_url
-  STRIPE_SECRET_KEY: stripe.secret_key
-  STRIPE_WEBHOOK_SECRET: stripe.webhook_secret
+Templates are `.env` files with `{{ item.id }}` expressions. Everything else passes through verbatim — comments, blank lines, hardcoded values.
+
+```bash
+# api/.env.template
+# target: .env
+NODE_ENV=dev
+PORT=3002
+HOST=0.0.0.0
+LOG_LEVEL=info
+
+# Database (Supabase)
+DATABASE_URL={{ supabase.database_url }}
+SUPABASE_URL={{ supabase.url }}
+SUPABASE_SERVICE_ROLE_KEY={{ supabase.service_role_key }}
+
+# Stripe
+STRIPE_SECRET_KEY={{ stripe.secret_key }}
+STRIPE_WEBHOOK_SECRET={{ stripe.webhook_secret }}
+# STRIPE_PRICE_PRO_MONTHLY={{ stripe.price_id.pro_monthly }}
 ```
+
+The output file target is set via a `# target: <path>` frontmatter line, or inferred by stripping `.template` from the filename (`.env.template` → `.env`).
+
+Templates are ideal when your `.env` files have structure — section comments, commented-out optional values, hardcoded defaults — that you want to preserve.
+
+#### Manifests
+
+Manifests are a simpler YAML format that maps env var names to store item IDs:
 
 ```yaml
 # web/env.manifest.yaml
@@ -119,7 +139,18 @@ vars:
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripe.publishable_key
 ```
 
-**Topologies** define which environment each component resolves against:
+Manifests are good for components where you just need a clean list of key-value pairs with no extra structure.
+
+#### Discovery order
+
+For each component, assembly looks for (first match wins):
+1. `env.manifest.yaml`
+2. `env.template`
+3. `.env.template`
+
+#### Topologies
+
+Topologies define which environment each component resolves against:
 
 ```yaml
 # topologies.yaml
@@ -161,9 +192,10 @@ Then assemble:
 urd assemble --topology all-local          # all components
 urd assemble --topology hybrid             # mix-and-match
 urd assemble --topology hybrid -c api      # just one component
+urd assemble --topology all-local --allow-missing  # skip missing values
 ```
 
-Each component gets its `.env` file written with decrypted values, ready to use.
+By default, assembly errors if a referenced store item or environment value is missing. Use `--allow-missing` to continue with empty values instead (warnings are printed to stderr).
 
 ### Encryption
 
@@ -198,7 +230,7 @@ Run `urd` with no arguments to launch the interactive terminal UI. Browse items,
 
 ## Demo
 
-The `demo/` directory contains a working example simulating a monorepo with three components (api, web, worker), a pre-populated store with Supabase and Stripe config, and topology presets. The demo encryption key is included since all values are fake.
+The `demo/` directory contains a working example simulating a monorepo with three components (api uses a template, web and worker use manifests), a pre-populated store with Supabase and Stripe config, and topology presets. The demo encryption key is included since all values are fake.
 
 To try it:
 
@@ -236,7 +268,7 @@ urd catalog list [-e ...] [-t ...] [-s ...]  List catalog entries
 urd catalog show <id>                        Show full item details
 urd catalog remove <id>                      Remove an item
 urd validate                                 Check store completeness
-urd assemble -t <topology> [-c <component>]  Generate .env files
+urd assemble -t <topo> [-c <comp>] [--allow-missing]  Generate .env files
 urd keys init                                Generate encryption key
 urd keys status                              Show key status
 urd keys export                              Print key for sharing

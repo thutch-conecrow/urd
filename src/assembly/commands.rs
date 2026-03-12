@@ -9,7 +9,8 @@ use crate::paths;
 use crate::store::types::{Store, load_store};
 
 use super::types::{
-    ComponentConfig, OverrideRule, glob_matches, load_manifest, load_topologies,
+    ComponentConfig, ComponentSource, OverrideRule, discover_component_source, find_expressions,
+    glob_matches, load_topologies,
 };
 
 pub fn assemble(args: &AssembleArgs) -> Result<()> {
@@ -34,7 +35,11 @@ pub fn assemble(args: &AssembleArgs) -> Result<()> {
                 args.topology
             );
         }
-        vec![topology.components.keys().find(|k| *k == name).expect("checked above")]
+        vec![topology
+            .components
+            .keys()
+            .find(|k| *k == name)
+            .expect("checked above")]
     } else {
         topology.components.keys().collect()
     };
@@ -42,7 +47,13 @@ pub fn assemble(args: &AssembleArgs) -> Result<()> {
     for comp_name in component_names {
         let config = &topology.components[comp_name];
         let overrides = topology.overrides.get(comp_name.as_str());
-        assemble_component(comp_name, config, overrides.map_or(&[], Vec::as_slice), &store)?;
+        assemble_component(
+            comp_name,
+            config,
+            overrides.map_or(&[], Vec::as_slice),
+            &store,
+            args.allow_missing,
+        )?;
     }
 
     Ok(())
@@ -53,34 +64,34 @@ fn assemble_component(
     config: &ComponentConfig,
     overrides: &[OverrideRule],
     store: &Store,
+    allow_missing: bool,
 ) -> Result<()> {
-    let manifest_path = config.path.join("env.manifest.yaml");
-    let manifest = load_manifest(&manifest_path)
+    let source = discover_component_source(&config.path)
         .with_context(|| format!("component '{name}'"))?;
 
+    match source {
+        ComponentSource::Manifest(manifest) => {
+            assemble_from_manifest(name, config, overrides, store, &manifest, allow_missing)
+        }
+        ComponentSource::Template(template) => {
+            assemble_from_template(name, config, overrides, store, &template, allow_missing)
+        }
+    }
+}
+
+fn assemble_from_manifest(
+    name: &str,
+    config: &ComponentConfig,
+    overrides: &[OverrideRule],
+    store: &Store,
+    manifest: &super::types::Manifest,
+    allow_missing: bool,
+) -> Result<()> {
     let mut lines = Vec::new();
 
     for (var_name, item_id) in &manifest.vars {
-        let item = store.get(item_id).with_context(|| {
-            format!("store item '{item_id}' not found (referenced by {var_name} in component '{name}')")
-        })?;
-
-        let env = resolve_env(item_id, &config.env, overrides);
-
-        let raw_value = item.values.get(env).with_context(|| {
-            format!(
-                "no '{env}' value for item '{item_id}' (needed by {var_name} in component '{name}')"
-            )
-        })?;
-
-        let value = if raw_value.starts_with("ENC[aes:") {
-            decrypt_value(raw_value)
-                .with_context(|| format!("failed to decrypt '{item_id}' ({env})"))?
-        } else {
-            raw_value.clone()
-        };
-
-        lines.push(format!("{var_name}={value}"));
+        let value = resolve_item(name, item_id, var_name, &config.env, overrides, store, allow_missing)?;
+        lines.push(format!("{var_name}={}", value.unwrap_or_default()));
     }
 
     let output_path = config.path.join(&manifest.target);
@@ -93,6 +104,97 @@ fn assemble_component(
     );
 
     Ok(())
+}
+
+fn assemble_from_template(
+    name: &str,
+    config: &ComponentConfig,
+    overrides: &[OverrideRule],
+    store: &Store,
+    template: &super::types::Template,
+    allow_missing: bool,
+) -> Result<()> {
+    let mut output_lines = Vec::new();
+    let mut resolved_count = 0u32;
+
+    for line in &template.lines {
+        let expressions = find_expressions(line);
+        if expressions.is_empty() {
+            output_lines.push(line.clone());
+            continue;
+        }
+
+        let mut result = line.clone();
+        // Process expressions in reverse order so positions stay valid
+        for (start, end, item_id) in expressions.iter().rev() {
+            let context_hint = format!("template expression '{{{{{item_id}}}}}' in component '{name}'");
+            let value =
+                resolve_item(name, item_id, &context_hint, &config.env, overrides, store, allow_missing)?;
+            result.replace_range(start..end, &value.unwrap_or_default());
+            resolved_count += 1;
+        }
+
+        output_lines.push(result);
+    }
+
+    let output_path = config.path.join(&template.target);
+    write_env_file(&output_path, &output_lines)?;
+
+    println!(
+        "Wrote {} ({resolved_count} resolved)",
+        output_path.display(),
+    );
+
+    Ok(())
+}
+
+/// Resolve a single store item to its decrypted value.
+///
+/// Returns `Ok(Some(value))` on success, `Ok(None)` if missing and `allow_missing` is true,
+/// or an error if missing and `allow_missing` is false.
+fn resolve_item(
+    comp_name: &str,
+    item_id: &str,
+    context: &str,
+    default_env: &str,
+    overrides: &[OverrideRule],
+    store: &Store,
+    allow_missing: bool,
+) -> Result<Option<String>> {
+    let Some(item) = store.get(item_id) else {
+        if allow_missing {
+            eprintln!(
+                "warning: store item '{item_id}' not found ({context})"
+            );
+            return Ok(None);
+        }
+        anyhow::bail!(
+            "store item '{item_id}' not found (referenced by {context} in component '{comp_name}')"
+        );
+    };
+
+    let env = resolve_env(item_id, default_env, overrides);
+
+    let Some(raw_value) = item.values.get(env) else {
+        if allow_missing {
+            eprintln!(
+                "warning: no '{env}' value for item '{item_id}' ({context})"
+            );
+            return Ok(None);
+        }
+        anyhow::bail!(
+            "no '{env}' value for item '{item_id}' (needed by {context} in component '{comp_name}')"
+        );
+    };
+
+    let value = if raw_value.starts_with("ENC[aes:") {
+        decrypt_value(raw_value)
+            .with_context(|| format!("failed to decrypt '{item_id}' ({env})"))?
+    } else {
+        raw_value.clone()
+    };
+
+    Ok(Some(value))
 }
 
 fn resolve_env<'a>(item_id: &str, default_env: &'a str, overrides: &'a [OverrideRule]) -> &'a str {
