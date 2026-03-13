@@ -1331,3 +1331,211 @@ API_KEY=secret123
         .assert()
         .failure();
 }
+
+// -- config / default environments --
+
+#[test]
+fn config_show_empty_by_default() {
+    let (home, work) = setup();
+
+    urd(&home, &work)
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No default environments configured"));
+}
+
+#[test]
+fn config_set_defaults_and_show() {
+    let (home, work) = setup();
+
+    urd(&home, &work)
+        .args(["config", "set-defaults", "local", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Default environments: local, prod"));
+
+    urd(&home, &work)
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Default environments: local, prod"));
+}
+
+#[test]
+fn config_set_defaults_clear() {
+    let (home, work) = setup();
+
+    urd(&home, &work)
+        .args(["config", "set-defaults", "local", "prod"])
+        .assert()
+        .success();
+
+    urd(&home, &work)
+        .args(["config", "set-defaults"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cleared default environments"));
+
+    urd(&home, &work)
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No default environments configured"));
+}
+
+#[test]
+fn new_items_inherit_default_environments() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Set defaults
+    urd(&home, &work)
+        .args(["config", "set-defaults", "local", "prod"])
+        .assert()
+        .success();
+
+    // Set a value — should inherit default environments
+    urd(&home, &work)
+        .args(["set", "app.port", "--env", "local", "3000"])
+        .assert()
+        .success();
+
+    // catalog show should list both local and prod as environments
+    urd(&home, &work)
+        .args(["catalog", "show", "app.port"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("environments: local, prod"));
+}
+
+#[test]
+fn catalog_add_inherits_default_environments() {
+    let (home, work) = setup();
+
+    // Set defaults
+    urd(&home, &work)
+        .args(["config", "set-defaults", "local", "prod"])
+        .assert()
+        .success();
+
+    // Add catalog entry without --env
+    urd(&home, &work)
+        .args(["catalog", "add", "db.host", "--description", "Database host"])
+        .assert()
+        .success();
+
+    // Should have inherited default environments
+    urd(&home, &work)
+        .args(["catalog", "show", "db.host"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("environments: local, prod"));
+}
+
+#[test]
+fn explicit_environments_not_overwritten_by_defaults() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Set defaults
+    urd(&home, &work)
+        .args(["config", "set-defaults", "local", "prod"])
+        .assert()
+        .success();
+
+    // Add catalog entry with explicit --env (not matching defaults)
+    urd(&home, &work)
+        .args(["catalog", "add", "db.host", "--env", "staging", "--env", "prod"])
+        .assert()
+        .success();
+
+    // Should keep explicit environments, not overwrite with defaults
+    urd(&home, &work)
+        .args(["catalog", "show", "db.host"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("environments: staging, prod"));
+}
+
+#[test]
+fn legacy_store_format_loads_correctly() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Write a legacy bare-map format store directly
+    let store_path = home.path().join("store.yaml");
+    fs::write(
+        &store_path,
+        "\
+app.port:
+  description: Application port
+  dev: '3000'
+  prod: '8080'
+",
+    )
+    .unwrap();
+
+    // Should load and serve data correctly
+    urd(&home, &work)
+        .args(["get", "app.port", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3000"));
+
+    // Mutate to trigger save in new format
+    urd(&home, &work)
+        .args(["set", "app.port", "--env", "staging", "4000"])
+        .assert()
+        .success();
+
+    // Re-read — should now be in new format but still work
+    urd(&home, &work)
+        .args(["get", "app.port", "--env", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3000"));
+
+    urd(&home, &work)
+        .args(["get", "app.port", "--env", "staging"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("4000"));
+
+    // Verify the file now has the new format with meta/items
+    let contents = fs::read_to_string(&store_path).unwrap();
+    assert!(contents.contains("meta:"));
+    assert!(contents.contains("items:"));
+}
+
+#[test]
+fn import_inherits_default_environments() {
+    let (home, work) = setup();
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    // Set defaults
+    urd(&home, &work)
+        .args(["config", "set-defaults", "local", "prod"])
+        .assert()
+        .success();
+
+    write_file(
+        &work,
+        "app.env",
+        "\
+DB_HOST=localhost
+",
+    );
+
+    urd(&home, &work)
+        .args(["import", work.path().join("app.env").to_str().unwrap(), "--env", "local"])
+        .assert()
+        .success();
+
+    // Imported item should inherit default environments
+    urd(&home, &work)
+        .args(["catalog", "show", "DB_HOST"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("environments: local, prod"));
+}

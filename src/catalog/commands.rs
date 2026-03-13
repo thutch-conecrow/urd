@@ -2,12 +2,13 @@ use anyhow::{Context, Result};
 
 use crate::cli::{CatalogAddArgs, CatalogListArgs, CatalogShowArgs};
 use crate::paths;
-use crate::store::types::{Sensitivity, load_store, save_store};
+use crate::store::types::{Sensitivity, apply_default_environments, load_store, save_store};
 
 pub fn add(args: &CatalogAddArgs) -> Result<()> {
     let path = paths::store_path()?;
     let mut store = load_store(&path)?;
 
+    let meta = store.meta.clone();
     let item = store.entry(args.id.clone()).or_default();
 
     if let Some(ref desc) = args.description {
@@ -20,11 +21,12 @@ pub fn add(args: &CatalogAddArgs) -> Result<()> {
         item.origin = Some(origin.clone());
     }
     if !args.env.is_empty() {
-        item.environments = args.env.clone();
+        item.environments.clone_from(&args.env);
     }
     if !args.tag.is_empty() {
-        item.tags = args.tag.clone();
+        item.tags.clone_from(&args.tag);
     }
+    apply_default_environments(&meta, item);
 
     save_store(&path, &store)?;
     println!("Updated catalog entry for {}", args.id);
@@ -55,7 +57,7 @@ pub fn list(args: &CatalogListArgs) -> Result<()> {
         return Ok(());
     }
 
-    for (id, item) in &store {
+    for (id, item) in store.iter() {
         // Filter by environment
         if !args.env.is_empty()
             && !item.environments.iter().any(|e| args.env.contains(e))
@@ -64,10 +66,9 @@ pub fn list(args: &CatalogListArgs) -> Result<()> {
         }
 
         // Filter by tag
-        if let Some(ref tag) = args.tag {
-            if !item.tags.contains(tag) {
+        if let Some(ref tag) = args.tag
+            && !item.tags.contains(tag) {
                 continue;
-            }
         }
 
         // Filter by sensitivity
@@ -128,7 +129,7 @@ pub fn show(args: &CatalogShowArgs) -> Result<()> {
     }
     if !item.values.is_empty() {
         println!("  values:");
-        for (env, _value) in &item.values {
+        for env in item.values.keys() {
             println!("    {env}: (set)");
         }
     }
@@ -142,7 +143,7 @@ pub fn validate() -> Result<()> {
 
     let mut issues = Vec::new();
 
-    for (id, item) in &store {
+    for (id, item) in store.iter() {
         // Check: item has expected environments but missing values
         for env in &item.environments {
             if !item.values.contains_key(env) {

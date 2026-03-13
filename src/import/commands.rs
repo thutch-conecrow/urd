@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::cli::{Format, ImportArgs};
 use crate::crypto;
 use crate::store::commands::infer_sensitivity_level;
-use crate::store::types::{load_store, save_store};
+use crate::store::types::{apply_default_environments, load_store, save_store};
 
 use crate::paths::store_path;
 
@@ -76,8 +76,10 @@ pub fn import(args: &ImportArgs) -> Result<()> {
                 value.clone()
             };
 
+            let meta = store.meta.clone();
             let item = store.entry(key.clone()).or_default();
             item.values.insert(args.env.clone(), stored_value);
+            apply_default_environments(&meta, item);
         }
         imported += 1;
     }

@@ -31,6 +31,9 @@ pub enum Command {
     Validate,
     /// Import values from a .env or YAML file
     Import(ImportArgs),
+    /// Manage store-level configuration
+    #[command(subcommand)]
+    Config(ConfigCommand),
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -181,6 +184,20 @@ pub struct CatalogListArgs {
 pub struct CatalogShowArgs {
     /// Config item ID
     pub id: String,
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCommand {
+    /// Set the default environments for new items
+    SetDefaults(ConfigSetDefaultsArgs),
+    /// Show current store configuration
+    Show,
+}
+
+#[derive(Parser)]
+pub struct ConfigSetDefaultsArgs {
+    /// Environment names (e.g., `local prod`)
+    pub envs: Vec<String>,
 }
 
 #[derive(Subcommand)]

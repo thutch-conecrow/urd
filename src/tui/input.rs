@@ -1,8 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::app::{
-    AddEnvStep, AddStep, App, MetadataField, Mode, SENSITIVITY_OPTIONS,
-};
+use super::app::{AddEnvStep, AddStep, App, MetadataField, Mode, SENSITIVITY_OPTIONS};
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     app.status_message = None;
@@ -13,6 +11,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         Mode::EditValue { .. } => handle_edit_value(app, key),
         Mode::EditMetadata { .. } => handle_edit_metadata(app, key),
         Mode::Clone { .. } => handle_clone(app, key),
+        Mode::CloneItem { .. } => handle_clone_item(app, key),
         Mode::Add { .. } => handle_add(app, key),
         Mode::AddEnv { .. } => handle_add_env(app, key),
     }
@@ -207,6 +206,24 @@ fn handle_clone(app: &mut App, key: KeyEvent) {
         }
         _ => {
             let Mode::Clone { ref mut input, .. } = app.mode else {
+                return;
+            };
+            apply_input_key(input, key);
+        }
+    }
+}
+
+fn handle_clone_item(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.cancel_mode(),
+        KeyCode::Enter => {
+            if let Err(e) = app.confirm_clone_item() {
+                app.status_message = Some(format!("Clone failed: {e}"));
+                app.cancel_mode();
+            }
+        }
+        _ => {
+            let Mode::CloneItem { ref mut input, .. } = app.mode else {
                 return;
             };
             apply_input_key(input, key);

@@ -285,6 +285,18 @@ fn draw_detail(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ]),
             Line::from(render_input_line("To environment: ", input)),
         ]
+    } else if let Mode::CloneItem {
+        ref source_id,
+        ref input,
+    } = app.mode
+    {
+        vec![
+            Line::from(vec![
+                Span::styled("Clone item ", Style::default().fg(Color::Cyan)),
+                Span::raw(source_id.clone()),
+            ]),
+            Line::from(render_input_line("New item ID: ", input)),
+        ]
     } else if let Mode::Add { ref step, .. } = app.mode {
         draw_add_step(step)
     } else if let Mode::AddEnv {
@@ -557,7 +569,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Span::styled("Esc", Style::default().fg(Color::Yellow)),
             Span::raw(" cancel"),
         ]),
-        Mode::Clone { .. } | Mode::Add { .. } | Mode::AddEnv { .. } => enter_next(),
+        Mode::Clone { .. } | Mode::CloneItem { .. } | Mode::Add { .. } | Mode::AddEnv { .. } => enter_next(),
         Mode::Browse => Line::from(vec![
             Span::styled(" q", Style::default().fg(Color::Yellow)),
             Span::raw(" quit  "),

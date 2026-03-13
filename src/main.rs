@@ -1,6 +1,7 @@
 mod assembly;
 mod catalog;
 mod cli;
+mod config;
 mod crypto;
 mod import;
 mod paths;
@@ -8,7 +9,7 @@ mod store;
 mod tui;
 
 use clap::Parser;
-use cli::{CatalogCommand, Cli, Command};
+use cli::{CatalogCommand, Cli, Command, ConfigCommand};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -32,6 +33,10 @@ fn main() -> anyhow::Result<()> {
         Command::Keys(ref cmd) => crypto::commands::keys(cmd)?,
         Command::Validate => catalog::commands::validate()?,
         Command::Import(ref args) => import::commands::import(args)?,
+        Command::Config(ref cmd) => match cmd {
+            ConfigCommand::SetDefaults(args) => config::commands::set_defaults(args)?,
+            ConfigCommand::Show => config::commands::show()?,
+        },
     }
 
     Ok(())

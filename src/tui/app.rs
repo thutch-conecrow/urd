@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::store::types::{Item, Store, save_store};
+use crate::store::types::{Item, Store, apply_default_environments, save_store};
 
 const UNDO_STACK_LIMIT: usize = 50;
 
@@ -128,6 +128,11 @@ pub enum Mode {
         item_id: String,
         step: AddEnvStep,
         env: String,
+    },
+    /// Cloning an entire item to a new ID.
+    CloneItem {
+        source_id: String,
+        input: InputState,
     },
 }
 
@@ -293,7 +298,7 @@ impl App {
             .as_ref()
             .map(|f| f.buffer.to_lowercase());
 
-        for (id, item) in &self.store {
+        for (id, item) in self.store.iter() {
             if let Some(ref f) = filter_str
                 && !f.is_empty()
                 && !id.to_lowercase().contains(f.as_str())
@@ -603,7 +608,7 @@ impl App {
         Ok(())
     }
 
-    /// Enter edit-value mode for any row that has an environment (EnvValue or MissingEnv).
+    /// Enter edit-value mode for any row that has an environment (`EnvValue` or `MissingEnv`).
     pub fn initiate_edit_value_any(&mut self) {
         match self.selected_row() {
             Some(Row::EnvValue(_, _)) => self.initiate_edit_value(),
@@ -694,16 +699,24 @@ impl App {
         Ok(())
     }
 
-    /// Initiate clone mode for the currently selected env value.
+    /// Initiate clone mode for the currently selected row.
     pub fn initiate_clone(&mut self) {
-        let Some(Row::EnvValue(id, env)) = self.selected_row() else {
-            return;
-        };
-        self.mode = Mode::Clone {
-            item_id: id.clone(),
-            source_env: env.clone(),
-            input: InputState::new(""),
-        };
+        match self.selected_row() {
+            Some(Row::EnvValue(id, env)) => {
+                self.mode = Mode::Clone {
+                    item_id: id.clone(),
+                    source_env: env.clone(),
+                    input: InputState::new(""),
+                };
+            }
+            Some(Row::ItemHeader(id)) => {
+                self.mode = Mode::CloneItem {
+                    source_id: id.clone(),
+                    input: InputState::new(""),
+                };
+            }
+            _ => {}
+        }
     }
 
     /// Confirm clone: copy the value to the target environment.
@@ -738,12 +751,14 @@ impl App {
 
         self.push_undo();
 
+        let meta = self.store.meta.clone();
         if let Some(item) = self.store.get_mut(&item_id) {
             item.values.insert(target_env.clone(), value);
             if !item.environments.contains(&target_env) {
                 item.environments.push(target_env.clone());
                 item.environments.sort();
             }
+            apply_default_environments(&meta, item);
         }
 
         save_store(&self.store_path, &self.store)?;
@@ -753,14 +768,48 @@ impl App {
         Ok(())
     }
 
+    /// Confirm clone-item: duplicate entire item to a new ID.
+    pub fn confirm_clone_item(&mut self) -> Result<()> {
+        let Mode::CloneItem {
+            ref source_id,
+            ref input,
+        } = self.mode
+        else {
+            return Ok(());
+        };
+
+        let new_id = input.buffer.trim().to_string();
+        if new_id.is_empty() {
+            return Ok(());
+        }
+
+        let source_id = source_id.clone();
+
+        let Some(source_item) = self.store.get(&source_id).cloned() else {
+            self.cancel_mode();
+            return Ok(());
+        };
+
+        self.push_undo();
+        self.store.items.insert(new_id.clone(), source_item);
+        save_store(&self.store_path, &self.store)?;
+        self.expanded.insert(new_id.clone());
+        self.rebuild_rows();
+        self.status_message = Some(format!("Cloned {source_id} → {new_id}"));
+        self.mode = Mode::Browse;
+        Ok(())
+    }
+
     /// Initiate add mode based on context.
     pub fn initiate_add(&mut self) {
         match self.selected_row() {
             Some(Row::EnvValue(id, _) | Row::MissingEnv(id, _)) => {
-                // Add a new env to this existing item
+                // Add a new env to this existing item — pre-fill with next missing default
+                let id = id.clone();
+                let prefill = self.next_missing_default_env(&id).unwrap_or_default();
                 self.mode = Mode::AddEnv {
-                    item_id: id.clone(),
-                    step: AddEnvStep::Env(InputState::new("")),
+                    item_id: id,
+                    step: AddEnvStep::Env(InputState::new(&prefill)),
                     env: String::new(),
                 };
             }
@@ -777,6 +826,17 @@ impl App {
                 };
             }
         }
+    }
+
+    /// Find the next default environment that the item is missing a value for.
+    fn next_missing_default_env(&self, item_id: &str) -> Option<String> {
+        let item = self.store.get(item_id)?;
+        self.store
+            .meta
+            .default_environments
+            .iter()
+            .find(|env| !item.values.contains_key(env.as_str()))
+            .cloned()
     }
 
     /// Advance the add wizard to the next step, or save if on the last step.
@@ -800,7 +860,13 @@ impl App {
                     return Ok(());
                 }
                 *id = input.buffer.trim().to_string();
-                AddStep::Env(InputState::new(""))
+                let env_prefill = self
+                    .store
+                    .meta
+                    .default_environments
+                    .first()
+                    .map_or("", String::as_str);
+                AddStep::Env(InputState::new(env_prefill))
             }
             AddStep::Env(input) => {
                 if input.buffer.trim().is_empty() {
@@ -840,6 +906,7 @@ impl App {
 
                 self.push_undo();
 
+                let meta = self.store.meta.clone();
                 let item = self.store.entry(id.clone()).or_default();
                 let stored_value = match sens {
                     1 => crate::crypto::encrypt_value(&val, crate::crypto::SensitivityLevel::Sensitive)?,
@@ -865,6 +932,7 @@ impl App {
                     item.environments.push(env.clone());
                     item.environments.sort();
                 }
+                apply_default_environments(&meta, item);
 
                 save_store(&self.store_path, &self.store)?;
                 self.expanded.insert(id.clone());
@@ -933,12 +1001,14 @@ impl App {
                     val
                 };
 
+                let meta = self.store.meta.clone();
                 if let Some(item) = self.store.get_mut(&item_id) {
                     item.values.insert(env.clone(), stored_value);
                     if !item.environments.contains(&env) {
                         item.environments.push(env.clone());
                         item.environments.sort();
                     }
+                    apply_default_environments(&meta, item);
                 }
 
                 save_store(&self.store_path, &self.store)?;

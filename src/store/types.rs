@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -47,8 +48,56 @@ pub struct Item {
     pub values: BTreeMap<String, String>,
 }
 
-/// The full store: item ID -> Item (metadata + values).
-pub type Store = BTreeMap<String, Item>;
+/// Store-level metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StoreMeta {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_environments: Vec<String>,
+}
+
+/// Serde wrapper for the new on-disk format: `{ meta, items }`.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoreFile {
+    #[serde(default)]
+    meta: StoreMeta,
+    #[serde(default)]
+    items: BTreeMap<String, Item>,
+}
+
+/// The full store: metadata + item map.
+#[derive(Debug, Clone, Default)]
+pub struct Store {
+    pub meta: StoreMeta,
+    pub items: BTreeMap<String, Item>,
+}
+
+impl Store {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Deref for Store {
+    type Target = BTreeMap<String, Item>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
+impl DerefMut for Store {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.items
+    }
+}
+
+/// Apply default environments to an item that doesn't already have its own.
+pub fn apply_default_environments(meta: &StoreMeta, item: &mut Item) {
+    if item.environments.is_empty() && !meta.default_environments.is_empty() {
+        item.environments.clone_from(&meta.default_environments);
+    }
+}
 
 pub fn load_store(path: &Path) -> Result<Store> {
     if !path.exists() {
@@ -62,10 +111,22 @@ pub fn load_store(path: &Path) -> Result<Store> {
         return Ok(Store::new());
     }
 
-    let store: Store = serde_yaml::from_str(&contents)
+    // Try the new `{ meta, items }` format first.
+    if let Ok(file) = serde_yaml::from_str::<StoreFile>(&contents) {
+        return Ok(Store {
+            meta: file.meta,
+            items: file.items,
+        });
+    }
+
+    // Fall back to the legacy bare-map format.
+    let items: BTreeMap<String, Item> = serde_yaml::from_str(&contents)
         .with_context(|| format!("could not parse {}", path.display()))?;
 
-    Ok(store)
+    Ok(Store {
+        meta: StoreMeta::default(),
+        items,
+    })
 }
 
 pub fn save_store(path: &Path, store: &Store) -> Result<()> {
@@ -73,7 +134,12 @@ pub fn save_store(path: &Path, store: &Store) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let yaml = serde_yaml::to_string(store)?;
+    let file = StoreFile {
+        meta: store.meta.clone(),
+        items: store.items.clone(),
+    };
+
+    let yaml = serde_yaml::to_string(&file)?;
     fs::write(path, yaml).with_context(|| format!("could not write {}", path.display()))?;
 
     Ok(())

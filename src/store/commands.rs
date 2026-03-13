@@ -6,8 +6,9 @@ use crate::crypto;
 use crate::crypto::SensitivityLevel;
 
 use super::paths::store_path;
-use super::types::{Sensitivity, load_store, save_store};
+use super::types::{Sensitivity, apply_default_environments, load_store, save_store};
 
+#[allow(clippy::too_many_lines)]
 pub fn set(mut args: SetArgs) -> Result<()> {
     let path = store_path()?;
     let mut store = load_store(&path)?;
@@ -27,21 +28,28 @@ pub fn set(mut args: SetArgs) -> Result<()> {
             value
         };
 
+        let meta = store.meta.clone();
         let item = store.entry(id.clone()).or_default();
         for env in &args.env {
             item.values.insert(env.clone(), stored_value.clone());
         }
+        apply_default_environments(&meta, item);
         save_store(&path, &store)?;
         println!("Set {id} for {}", args.env.join(", "));
     } else {
         // Interactive mode — Escape on Select prompts goes back one step
-        let env_options = &["dev", "prod", "staging"];
+        let env_options: Vec<String> = if store.meta.default_environments.is_empty() {
+            vec!["dev".into(), "prod".into(), "staging".into()]
+        } else {
+            store.meta.default_environments.clone()
+        };
         let sensitivity_options = &["plaintext", "sensitive", "secret"];
         let has_id = args.id.is_some();
         let has_env = !args.env.is_empty();
         let has_sensitivity = args.sensitive || args.secret;
 
         // Steps that support back-navigation via Escape
+        #[allow(clippy::items_after_statements)]
         #[derive(Clone, Copy)]
         enum Step { Id, Env, Sensitivity, Value, Description, Origin, Tags, Done }
 
@@ -71,18 +79,15 @@ pub fn set(mut args: SetArgs) -> Result<()> {
                 Step::Env => {
                     let selection = Select::new()
                         .with_prompt("Environment")
-                        .items(env_options)
+                        .items(&env_options)
                         .default(0)
                         .interact_opt()?;
-                    match selection {
-                        Some(i) => {
-                            envs = vec![env_options[i].to_string()];
-                            step = if has_sensitivity { Step::Value } else { Step::Sensitivity };
-                        }
-                        None => {
-                            if has_id { return Ok(()); }
-                            step = Step::Id;
-                        }
+                    if let Some(i) = selection {
+                        envs = vec![env_options[i].clone()];
+                        step = if has_sensitivity { Step::Value } else { Step::Sensitivity };
+                    } else {
+                        if has_id { return Ok(()); }
+                        step = Step::Id;
                     }
                 }
                 Step::Sensitivity => {
@@ -99,19 +104,16 @@ pub fn set(mut args: SetArgs) -> Result<()> {
                         .items(sensitivity_options)
                         .default(default_idx)
                         .interact_opt()?;
-                    match selection {
-                        Some(i) => {
-                            level = match i {
-                                1 => Some(SensitivityLevel::Sensitive),
-                                2 => Some(SensitivityLevel::Secret),
-                                _ => None,
-                            };
-                            step = Step::Value;
-                        }
-                        None => {
-                            if has_env { return Ok(()); }
-                            step = Step::Env;
-                        }
+                    if let Some(i) = selection {
+                        level = match i {
+                            1 => Some(SensitivityLevel::Sensitive),
+                            2 => Some(SensitivityLevel::Secret),
+                            _ => None,
+                        };
+                        step = Step::Value;
+                    } else {
+                        if has_env { return Ok(()); }
+                        step = Step::Env;
                     }
                 }
                 Step::Value => {
@@ -157,6 +159,7 @@ pub fn set(mut args: SetArgs) -> Result<()> {
                     };
 
                     // Save everything
+                    let meta = store.meta.clone();
                     let item = store.entry(id.clone()).or_default();
                     for env in &envs {
                         item.values.insert(env.clone(), stored_value.clone());
@@ -168,7 +171,7 @@ pub fn set(mut args: SetArgs) -> Result<()> {
                         item.origin = origin.take();
                     }
                     if !tags.is_empty() {
-                        item.tags = tags.clone();
+                        item.tags.clone_from(&tags);
                     }
                     if let Some(sens) = &level {
                         item.sensitivity = Some(match sens {
@@ -176,7 +179,8 @@ pub fn set(mut args: SetArgs) -> Result<()> {
                             SensitivityLevel::Secret => Sensitivity::Secret,
                         });
                     }
-                    item.environments = envs.clone();
+                    item.environments.clone_from(&envs);
+                    apply_default_environments(&meta, item);
 
                     save_store(&path, &store)?;
                     println!("Set {id} for {}", envs.join(", "));
@@ -241,7 +245,7 @@ pub fn list(args: &ListArgs) -> Result<()> {
         return Ok(());
     }
 
-    for (id, item) in &store {
+    for (id, item) in store.iter() {
         let filtered_values: Vec<(&String, &String)> = if args.env.is_empty() {
             item.values.iter().collect()
         } else {
