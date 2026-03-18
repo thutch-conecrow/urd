@@ -6,17 +6,33 @@ Named after [Urð](https://en.wikipedia.org/wiki/Ur%C3%B0r), the Norse Norn who 
 
 ## Install
 
+### Pre-built binary (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thutch-conecrow/urd/main/install-binary.sh | bash
+```
+
+This detects your OS and architecture, downloads the latest release, and installs to `~/.local/bin`. Override the install directory with `URD_INSTALL_DIR`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thutch-conecrow/urd/main/install-binary.sh | URD_INSTALL_DIR=/usr/local/bin bash
+```
+
+To install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thutch-conecrow/urd/main/install-binary.sh | bash -s v0.1.0
+```
+
+Supported platforms: Linux (x86_64, aarch64), macOS (Intel, Apple Silicon).
+
+### From source
+
 Requires [Rust](https://rustup.rs/) 1.85+ (edition 2024).
 
 ```bash
-git clone <repo-url> && cd config
+git clone https://github.com/thutch-conecrow/urd.git && cd urd
 ./install.sh
-```
-
-Or directly:
-
-```bash
-cargo install --path .
 ```
 
 ## Quick start
