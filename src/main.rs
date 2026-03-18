@@ -37,6 +37,7 @@ fn main() -> anyhow::Result<()> {
             ConfigCommand::SetDefaults(args) => config::commands::set_defaults(args)?,
             ConfigCommand::Show => config::commands::show()?,
         },
+        Command::Status => store::commands::status()?,
     }
 
     Ok(())

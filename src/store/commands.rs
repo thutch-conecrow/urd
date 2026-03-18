@@ -323,3 +323,96 @@ pub fn infer_sensitivity_level(
             })
     })
 }
+
+pub fn status() -> Result<()> {
+    use std::collections::BTreeSet;
+
+    let path = store_path()?;
+
+    // Key status
+    let key_id_path = crate::paths::key_id_path()?;
+    if key_id_path.exists() {
+        let id = std::fs::read_to_string(&key_id_path)?.trim().to_string();
+        let key_path = crate::paths::key_file_path(&id)?;
+        if key_path.exists() {
+            println!("Encryption: key {id} (ready)");
+        } else {
+            println!("Encryption: key {id} (KEY FILE MISSING)");
+        }
+    } else {
+        println!("Encryption: not configured");
+    }
+
+    // Store summary
+    let store = load_store(&path)?;
+
+    if store.is_empty() {
+        println!("Store:      empty");
+        return Ok(());
+    }
+
+    let item_count = store.len();
+    let values_count: usize = store.values().map(|item| item.values.len()).sum();
+
+    // Collect all environments that appear anywhere
+    let all_envs: BTreeSet<&str> = store
+        .values()
+        .flat_map(|item| {
+            item.values
+                .keys()
+                .map(String::as_str)
+                .chain(item.environments.iter().map(String::as_str))
+        })
+        .collect();
+
+    println!("Items:      {item_count}");
+    println!("Values:     {values_count}");
+    if !all_envs.is_empty() {
+        let env_list: Vec<&str> = all_envs.into_iter().collect();
+        println!("Envs:       {}", env_list.join(", "));
+    }
+
+    // Count issues
+    let mut missing = 0u32;
+    let mut unencrypted = 0u32;
+    let mut undocumented = 0u32;
+
+    for item in store.values() {
+        for env in &item.environments {
+            if !item.values.contains_key(env) {
+                missing += 1;
+            }
+        }
+
+        if let Some(Sensitivity::Sensitive | Sensitivity::Secret) = item.sensitivity {
+            for value in item.values.values() {
+                if !value.starts_with("ENC[aes:") {
+                    unencrypted += 1;
+                }
+            }
+        }
+
+        if !item.values.is_empty() && item.description.is_none() {
+            undocumented += 1;
+        }
+    }
+
+    let total_issues = missing + unencrypted + undocumented;
+    if total_issues == 0 {
+        println!("Issues:     none");
+    } else {
+        println!("Issues:     {total_issues}");
+        if missing > 0 {
+            println!("  missing values:    {missing}");
+        }
+        if unencrypted > 0 {
+            println!("  unencrypted:       {unencrypted}");
+        }
+        if undocumented > 0 {
+            println!("  undocumented:      {undocumented}");
+        }
+        println!("Run `urd validate` for details.");
+    }
+
+    Ok(())
+}

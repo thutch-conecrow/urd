@@ -152,6 +152,8 @@ STRIPE_WEBHOOK_SECRET={{ stripe.webhook_secret }}
 
 The output file target is set via a `# target: <path>` frontmatter line, or inferred by stripping `.template` from the filename (`.env.template` → `.env`).
 
+Commented-out lines containing `{{ }}` expressions are still resolved — `# STRIPE_PRICE={{ stripe.price_id }}` becomes `# STRIPE_PRICE=price_abc123`. This lets you show what a value *would* be without activating it.
+
 Templates are ideal when your `.env` files have structure — section comments, commented-out optional values, hardcoded defaults — that you want to preserve.
 
 #### Manifests
@@ -221,9 +223,25 @@ urd assemble --topology all-local          # all components
 urd assemble --topology hybrid             # mix-and-match
 urd assemble --topology hybrid -c api      # just one component
 urd assemble --topology all-local --allow-missing  # skip missing values
+urd assemble --topology all-local --dry-run        # preview without writing
 ```
 
 By default, assembly errors if a referenced store item or environment value is missing. Use `--allow-missing` to continue with empty values instead (warnings are printed to stderr).
+
+Use `--dry-run` to preview the resolved output without writing any files. Each component's output is printed to stdout with a `--- <path> ---` separator:
+
+```
+$ urd assemble --topology all-local --dry-run
+--- api/.env ---
+NODE_ENV=dev
+PORT=3002
+DATABASE_URL=postgresql://localhost:54322/postgres
+SUPABASE_URL=http://localhost:54321
+
+--- web/.env.local ---
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbG...
+```
 
 ### Encryption
 
@@ -242,6 +260,24 @@ urd keys export    # print the key (for sharing out-of-band)
 
 To share access, export the key and send it securely to your teammate. They place it at `~/.config/urd/keys/<id>.key`.
 
+### Status
+
+Get a quick summary of store health:
+
+```bash
+urd status
+```
+
+```
+Encryption: key a1b2c3d4 (ready)
+Items:      29
+Values:     54
+Envs:       dev, local, prod
+Issues:     none
+```
+
+Reports encryption key status, item and value counts, all environments in use, and a count of issues (missing values, unencrypted sensitive items, undocumented items). When issues are found, run `urd validate` for details.
+
 ### Validation
 
 Check your store for completeness:
@@ -250,7 +286,7 @@ Check your store for completeness:
 urd validate
 ```
 
-Reports items missing descriptions, sensitivity levels, or expected environment values.
+Reports items with missing environment values, sensitive items stored unencrypted, and items with values but no description.
 
 ### TUI
 
@@ -340,8 +376,9 @@ urd catalog add <id> [-d ...] [-s ...] ...   Add/update catalog metadata
 urd catalog list [-e ...] [-t ...] [-s ...]  List catalog entries
 urd catalog show <id>                        Show full item details
 urd catalog remove <id>                      Remove an item
+urd status                                   Show store health summary
 urd validate                                 Check store completeness
-urd assemble -t <topo> [-c <comp>] [--allow-missing]  Generate .env files
+urd assemble -t <topo> [-c <comp>] [--allow-missing] [--dry-run]  Generate .env files
 urd keys init                                Generate encryption key
 urd keys status                              Show key status
 urd keys export                              Print key for sharing

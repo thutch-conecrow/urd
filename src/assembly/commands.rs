@@ -53,6 +53,7 @@ pub fn assemble(args: &AssembleArgs) -> Result<()> {
             overrides.map_or(&[], Vec::as_slice),
             &store,
             args.allow_missing,
+            args.dry_run,
         )?;
     }
 
@@ -65,28 +66,42 @@ fn assemble_component(
     overrides: &[OverrideRule],
     store: &Store,
     allow_missing: bool,
+    dry_run: bool,
 ) -> Result<()> {
     let source = discover_component_source(&config.path)
         .with_context(|| format!("component '{name}'"))?;
 
-    match source {
+    let (output_path, lines) = match source {
         ComponentSource::Manifest(manifest) => {
-            assemble_from_manifest(name, config, overrides, store, &manifest, allow_missing)
+            resolve_manifest(name, config, overrides, store, &manifest, allow_missing)?
         }
         ComponentSource::Template(template) => {
-            assemble_from_template(name, config, overrides, store, &template, allow_missing)
+            resolve_template(name, config, overrides, store, &template, allow_missing)?
         }
+    };
+
+    if dry_run {
+        println!("--- {} ---", output_path.display());
+        for line in &lines {
+            println!("{line}");
+        }
+        println!();
+    } else {
+        write_env_file(&output_path, &lines)?;
+        println!("Wrote {} ({} lines)", output_path.display(), lines.len());
     }
+
+    Ok(())
 }
 
-fn assemble_from_manifest(
+fn resolve_manifest(
     name: &str,
     config: &ComponentConfig,
     overrides: &[OverrideRule],
     store: &Store,
     manifest: &super::types::Manifest,
     allow_missing: bool,
-) -> Result<()> {
+) -> Result<(std::path::PathBuf, Vec<String>)> {
     let mut lines = Vec::new();
 
     for (var_name, item_id) in &manifest.vars {
@@ -95,27 +110,18 @@ fn assemble_from_manifest(
     }
 
     let output_path = config.path.join(&manifest.target);
-    write_env_file(&output_path, &lines)?;
-
-    println!(
-        "Wrote {} ({} vars)",
-        output_path.display(),
-        manifest.vars.len()
-    );
-
-    Ok(())
+    Ok((output_path, lines))
 }
 
-fn assemble_from_template(
+fn resolve_template(
     name: &str,
     config: &ComponentConfig,
     overrides: &[OverrideRule],
     store: &Store,
     template: &super::types::Template,
     allow_missing: bool,
-) -> Result<()> {
+) -> Result<(std::path::PathBuf, Vec<String>)> {
     let mut output_lines = Vec::new();
-    let mut resolved_count = 0u32;
 
     for line in &template.lines {
         let expressions = find_expressions(line);
@@ -125,27 +131,18 @@ fn assemble_from_template(
         }
 
         let mut result = line.clone();
-        // Process expressions in reverse order so positions stay valid
         for (start, end, item_id) in expressions.iter().rev() {
             let context_hint = format!("template expression '{{{{{item_id}}}}}' in component '{name}'");
             let value =
                 resolve_item(name, item_id, &context_hint, &config.env, overrides, store, allow_missing)?;
             result.replace_range(start..end, &value.unwrap_or_default());
-            resolved_count += 1;
         }
 
         output_lines.push(result);
     }
 
     let output_path = config.path.join(&template.target);
-    write_env_file(&output_path, &output_lines)?;
-
-    println!(
-        "Wrote {} ({resolved_count} resolved)",
-        output_path.display(),
-    );
-
-    Ok(())
+    Ok((output_path, output_lines))
 }
 
 /// Resolve a single store item to its decrypted value.

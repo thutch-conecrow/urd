@@ -583,8 +583,8 @@ fn assemble_all_local() {
         .args(["assemble", "--topology", "all-local"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Wrote api/.env (3 vars)"))
-        .stdout(predicate::str::contains("Wrote web/.env.local (1 vars)"));
+        .stdout(predicate::str::contains("Wrote api/.env (3 lines)"))
+        .stdout(predicate::str::contains("Wrote web/.env.local (1 lines)"));
 
     let api_env = read_file(&work, "api/.env");
     assert!(api_env.contains("APP_URL=http://localhost:3000"));

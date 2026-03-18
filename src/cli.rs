@@ -34,6 +34,8 @@ pub enum Command {
     /// Manage store-level configuration
     #[command(subcommand)]
     Config(ConfigCommand),
+    /// Show store health summary
+    Status,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -78,6 +80,9 @@ pub struct AssembleArgs {
     /// Continue on missing store values (writes empty value instead of erroring)
     #[arg(long)]
     pub allow_missing: bool,
+    /// Preview what would be assembled without writing files
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Parser)]
