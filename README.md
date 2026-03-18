@@ -22,8 +22,11 @@ cargo install --path .
 ## Quick start
 
 ```bash
-# Initialize encryption for this project
-urd keys init
+# Initialize urd for this project (generates key, sets envs, creates topologies skeleton)
+urd init --env dev --env prod
+
+# Or interactively — pick from preset env combinations or enter your own
+urd init
 
 # Store some values
 urd set supabase.url -e dev http://localhost:54321
@@ -44,6 +47,35 @@ urd get stripe.secret_key --env prod --reveal
 # Launch the TUI for browsing and editing
 urd
 ```
+
+## Initialization
+
+`urd init` bootstraps a project in one step. It's progressive — each step checks current state and skips anything already configured, so it's safe to run multiple times.
+
+```bash
+# Non-interactive: pass envs directly
+urd init --env dev --env prod
+
+# Interactive: pick from presets or enter custom environments
+urd init
+```
+
+The interactive mode presents a preset picker:
+
+```
+? Default environments
+> dev, prod
+  local, dev, prod
+  local, staging, prod
+  dev, staging, prod
+  Custom
+```
+
+What it does:
+
+1. **Keys** — generates an encryption key if none exists, skips if already configured
+2. **Environments** — sets default environments for new items, skips if already configured
+3. **Topologies** — writes a commented `topologies.yaml` skeleton, skips if the file already exists
 
 ## Concepts
 
@@ -365,6 +397,7 @@ urd get STRIPE_SECRET_KEY --env dev --reveal
 
 ```
 urd                                          Launch TUI
+urd init [-e <env> ...]                      Initialize urd for this project
 urd set                                      Interactive provisioning
 urd set <id> -e <env> <value>                Set a value
 urd set <id> -e <env> --secret <value>       Set an encrypted value

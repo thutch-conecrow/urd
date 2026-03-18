@@ -1539,3 +1539,106 @@ DB_HOST=localhost
         .success()
         .stdout(predicate::str::contains("environments: local, prod"));
 }
+
+// -- init --
+
+#[test]
+fn init_non_interactive_creates_everything() {
+    let (home, work) = setup();
+
+    urd(&home, &work)
+        .args(["init", "--env", "dev", "--env", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Keys: generated"))
+        .stdout(predicate::str::contains("Environments: dev, prod"))
+        .stdout(predicate::str::contains("Topologies: created topologies.yaml"));
+
+    // Key was created
+    assert!(home.path().join("key-id").exists());
+
+    // Store has default envs
+    urd(&home, &work)
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dev, prod"));
+
+    // Topologies skeleton was written
+    let topo = read_file(&work, "topologies.yaml");
+    assert!(topo.contains("all-dev"));
+    assert!(topo.contains("all-prod"));
+}
+
+#[test]
+fn init_skips_existing_keys() {
+    let (home, work) = setup();
+
+    // Pre-init keys
+    urd(&home, &work).args(["keys", "init"]).assert().success();
+
+    urd(&home, &work)
+        .args(["init", "--env", "dev", "--env", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Keys: already configured"))
+        .stdout(predicate::str::contains("Environments: dev, prod"));
+}
+
+#[test]
+fn init_skips_existing_envs() {
+    let (home, work) = setup();
+
+    // Pre-configure envs
+    urd(&home, &work)
+        .args(["config", "set-defaults", "local", "staging", "prod"])
+        .assert()
+        .success();
+
+    urd(&home, &work)
+        .args(["init", "--env", "dev", "--env", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Environments: already configured (local, staging, prod)"));
+}
+
+#[test]
+fn init_skips_existing_topologies() {
+    let (home, work) = setup();
+
+    // Pre-create topologies.yaml
+    fs::write(work.path().join("topologies.yaml"), "existing: content\n").unwrap();
+
+    urd(&home, &work)
+        .args(["init", "--env", "dev", "--env", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Topologies: topologies.yaml already exists, skipping"));
+
+    // Original content preserved
+    let topo = read_file(&work, "topologies.yaml");
+    assert!(topo.contains("existing: content"));
+}
+
+#[test]
+fn init_is_fully_progressive() {
+    let (home, work) = setup();
+
+    // First run — creates everything
+    urd(&home, &work)
+        .args(["init", "--env", "dev", "--env", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Keys: generated"))
+        .stdout(predicate::str::contains("Environments: dev, prod"))
+        .stdout(predicate::str::contains("Topologies: created"));
+
+    // Second run — skips everything
+    urd(&home, &work)
+        .args(["init", "--env", "dev", "--env", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Keys: already configured"))
+        .stdout(predicate::str::contains("Environments: already configured"))
+        .stdout(predicate::str::contains("Topologies: topologies.yaml already exists"));
+}

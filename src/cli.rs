@@ -36,6 +36,8 @@ pub enum Command {
     Config(ConfigCommand),
     /// Show store health summary
     Status,
+    /// Initialize urd for this project
+    Init(InitArgs),
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -203,6 +205,13 @@ pub enum ConfigCommand {
 pub struct ConfigSetDefaultsArgs {
     /// Environment names (e.g., `local prod`)
     pub envs: Vec<String>,
+}
+
+#[derive(Parser)]
+pub struct InitArgs {
+    /// Default environment(s) (e.g., --env dev --env prod)
+    #[arg(short, long)]
+    pub env: Vec<String>,
 }
 
 #[derive(Subcommand)]

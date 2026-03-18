@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod crypto;
 mod import;
+mod init;
 mod paths;
 mod store;
 mod tui;
@@ -38,6 +39,7 @@ fn main() -> anyhow::Result<()> {
             ConfigCommand::Show => config::commands::show()?,
         },
         Command::Status => store::commands::status()?,
+        Command::Init(ref args) => init::commands::init(args)?,
     }
 
     Ok(())
