@@ -4,6 +4,18 @@ A CLI tool for managing configuration and secrets across projects. Encrypted val
 
 Named after [Urð](https://en.wikipedia.org/wiki/Ur%C3%B0r), the Norse Norn who tends the Well of Urd — the source of truth that nourishes Yggdrasil.
 
+### Interactive TUI
+
+![TUI demo](vhs/tui.gif)
+
+### CLI usage
+
+![CLI demo](vhs/cli.gif)
+
+### Assembly engine
+
+![Assembly demo](vhs/assemble.gif)
+
 ## Install
 
 ### Pre-built binary (recommended)
