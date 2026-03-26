@@ -276,6 +276,31 @@ custom-layout:
   web: dev
 ```
 
+#### Filters
+
+Expressions support pipe filters that transform values during assembly. Filters are chainable and work in both templates and manifests.
+
+```bash
+# template
+SUPABASE_URL={{ supabase.url | local_ip }}
+
+# manifest
+vars:
+  EXPO_PUBLIC_SUPABASE_URL: supabase.url | local_ip
+```
+
+**`local_ip`** — Replaces loopback hosts (`localhost`, `127.0.0.1`, `::1`) in URLs with the machine's LAN IP address. Non-loopback URLs pass through unchanged, so it's safe to apply unconditionally across topologies.
+
+This is useful for mobile development (e.g., Expo on a physical device) where `localhost` in a URL would resolve to the device itself instead of your development machine.
+
+```
+# input:  http://localhost:54321
+# output: http://192.168.1.50:54321
+
+# input:  https://myproject.supabase.co
+# output: https://myproject.supabase.co  (unchanged — not loopback)
+```
+
 Then assemble:
 
 ```bash

@@ -1020,6 +1020,86 @@ APP_URL={{ app.url }}
     assert!(env.contains("APP_URL=http://localhost:3000"));
 }
 
+#[test]
+fn assemble_manifest_local_ip_filter() {
+    let (home, work) = setup_assembly();
+
+    // Use local_ip filter on a localhost URL
+    write_file(
+        &work,
+        "api/env.manifest.yaml",
+        "\
+target: \".env\"
+vars:
+  APP_URL: app.url | local_ip
+  DB_HOST: db.host
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "api"])
+        .assert()
+        .success();
+
+    let env = read_file(&work, "api/.env");
+    // localhost should have been replaced with a LAN IP in the URL
+    let app_line = env.lines().find(|l| l.starts_with("APP_URL=")).unwrap();
+    assert!(!app_line.contains("localhost"), "APP_URL should not contain localhost: {app_line}");
+    assert!(app_line.starts_with("APP_URL=http://"));
+    // db.host is not a URL and has no filter, should be unchanged
+    assert!(env.contains("DB_HOST=localhost"));
+}
+
+#[test]
+fn assemble_manifest_local_ip_preserves_prod() {
+    let (home, work) = setup_assembly();
+
+    // Use local_ip filter — but prod URL should pass through unchanged
+    write_file(
+        &work,
+        "api/env.manifest.yaml",
+        "\
+target: \".env\"
+vars:
+  APP_URL: app.url | local_ip
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-prod", "--component", "api"])
+        .assert()
+        .success();
+
+    let env = read_file(&work, "api/.env");
+    assert!(env.contains("APP_URL=https://app.example.com"));
+}
+
+#[test]
+fn assemble_template_local_ip_filter() {
+    let (home, work) = setup_assembly();
+
+    fs::remove_file(work.path().join("api/env.manifest.yaml")).unwrap();
+    write_file(
+        &work,
+        "api/.env.template",
+        "\
+APP_URL={{ app.url | local_ip }}
+DB_HOST={{ db.host }}
+",
+    );
+
+    urd(&home, &work)
+        .args(["assemble", "--topology", "all-local", "--component", "api"])
+        .assert()
+        .success();
+
+    let env = read_file(&work, "api/.env");
+    let app_line = env.lines().find(|l| l.starts_with("APP_URL=")).unwrap();
+    assert!(!app_line.contains("localhost"), "APP_URL should not contain localhost: {app_line}");
+    assert!(app_line.starts_with("APP_URL=http://"));
+    assert!(env.contains("DB_HOST=localhost"));
+}
+
 // -- import --
 
 #[test]

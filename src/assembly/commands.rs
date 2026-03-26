@@ -8,6 +8,7 @@ use crate::crypto::decrypt_value;
 use crate::paths;
 use crate::store::types::{Store, load_store};
 
+use super::filters::{apply_filters, parse_expression};
 use super::types::{
     ComponentConfig, ComponentSource, OverrideRule, discover_component_source, find_expressions,
     glob_matches, load_topologies,
@@ -104,8 +105,18 @@ fn resolve_manifest(
 ) -> Result<(std::path::PathBuf, Vec<String>)> {
     let mut lines = Vec::new();
 
-    for (var_name, item_id) in &manifest.vars {
-        let value = resolve_item(name, item_id, var_name, &config.env, overrides, store, allow_missing)?;
+    for (var_name, raw_expr) in &manifest.vars {
+        let (item_id, filters) = parse_expression(raw_expr)
+            .with_context(|| format!("manifest var '{var_name}' in component '{name}'"))?;
+        let value = resolve_item(name, &item_id, var_name, &config.env, overrides, store, allow_missing)?;
+        let value = match value {
+            Some(v) if !filters.is_empty() => {
+                let filtered = apply_filters(&v, &filters)
+                    .with_context(|| format!("filtering '{item_id}' for var '{var_name}' in component '{name}'"))?;
+                Some(filtered)
+            }
+            other => other,
+        };
         lines.push(format!("{var_name}={}", value.unwrap_or_default()));
     }
 
@@ -131,10 +142,20 @@ fn resolve_template(
         }
 
         let mut result = line.clone();
-        for (start, end, item_id) in expressions.iter().rev() {
-            let context_hint = format!("template expression '{{{{{item_id}}}}}' in component '{name}'");
+        for (start, end, raw_expr) in expressions.iter().rev() {
+            let (item_id, filters) = parse_expression(raw_expr)
+                .with_context(|| format!("template expression '{{{{{raw_expr}}}}}' in component '{name}'"))?;
+            let context_hint = format!("template expression '{{{{{raw_expr}}}}}' in component '{name}'");
             let value =
-                resolve_item(name, item_id, &context_hint, &config.env, overrides, store, allow_missing)?;
+                resolve_item(name, &item_id, &context_hint, &config.env, overrides, store, allow_missing)?;
+            let value = match value {
+                Some(v) if !filters.is_empty() => {
+                    let filtered = apply_filters(&v, &filters)
+                        .with_context(|| format!("filtering '{item_id}' in component '{name}'"))?;
+                    Some(filtered)
+                }
+                other => other,
+            };
             result.replace_range(start..end, &value.unwrap_or_default());
         }
 
