@@ -5,7 +5,13 @@ use clap::{Parser, Subcommand};
 use crate::store::types::Sensitivity;
 
 #[derive(Parser)]
-#[command(name = "urd", about = "Configuration and secrets manager")]
+#[command(name = "urd", version, about = "Configuration and secrets manager", long_about = None, help_template = "\
+{name} v{version}
+{about}
+
+{usage-heading} {usage}
+
+{all-args}")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,

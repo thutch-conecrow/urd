@@ -378,6 +378,8 @@ pub fn infer_sensitivity_level(
 pub fn status() -> Result<()> {
     use std::collections::BTreeSet;
 
+    println!("urd {}", env!("CARGO_PKG_VERSION"));
+
     let path = store_path()?;
 
     // Key status
