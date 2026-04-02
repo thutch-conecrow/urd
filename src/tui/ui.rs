@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::crypto;
+use crate::store::types::Encoding;
 
 use super::app::{
     AddEnvStep, AddStep, App, DeleteTarget, MetadataField, Mode, Row, SENSITIVITY_OPTIONS,
@@ -136,6 +137,9 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                     Span::styled(id.clone(), style),
                     badge,
                 ];
+                if item.encoding.as_ref() == Some(&Encoding::Base64) {
+                    spans.push(Span::styled(" [file]", Style::default().fg(Color::Magenta)));
+                }
                 if !warnings.is_empty() {
                     spans.push(Span::styled(
                         format!(" ({})", warnings.join(", ")),
@@ -184,8 +188,11 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                         Span::raw(after.to_string()),
                     ])
                 } else {
+                    let is_file = item.encoding.as_ref() == Some(&Encoding::Base64);
                     let value = item.values.get(env).map_or("", String::as_str);
-                    let display_value = if crypto::parse_sensitivity(value).is_some() {
+                    let display_value = if is_file {
+                        "(file)".to_string()
+                    } else if crypto::parse_sensitivity(value).is_some() {
                         if app.is_revealed(id) {
                             crypto::decrypt_value(value)
                                 .unwrap_or_else(|_| "(decrypt error)".into())
@@ -262,6 +269,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     frame.render_widget(list, area);
 }
 
+#[allow(clippy::too_many_lines)]
 fn draw_detail(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = Block::default().borders(Borders::TOP);
 
@@ -331,6 +339,12 @@ fn draw_detail(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             lines.push(Line::from(vec![
                 Span::styled("environments: ", Style::default().fg(Color::Cyan)),
                 Span::raw(item.environments.join(", ")),
+            ]));
+        }
+        if item.encoding.as_ref() == Some(&Encoding::Base64) {
+            lines.push(Line::from(vec![
+                Span::styled("encoding: ", Style::default().fg(Color::Cyan)),
+                Span::raw("base64 (file)"),
             ]));
         }
 

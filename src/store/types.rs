@@ -7,6 +7,13 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+/// Value encoding (e.g. base64 for binary files).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Encoding {
+    Base64,
+}
+
 /// Sensitivity declaration for a catalog item.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -43,6 +50,9 @@ pub struct Item {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<Encoding>,
 
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
     pub values: BTreeMap<String, String>,

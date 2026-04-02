@@ -150,6 +150,31 @@ urd catalog list
 urd catalog show stripe.secret_key
 ```
 
+### File storage
+
+Binary files (certificates, keys, credentials) can be stored as base64-encoded values. The file contents are read, base64-encoded, optionally encrypted, and stored like any other value. The item is tagged with `encoding: base64` so urd knows to treat it as a file.
+
+```bash
+# Store a .p8 key file as a secret
+urd set apple.auth_key -e prod --secret --in-file ~/Downloads/AuthKey_ABC123.p8
+
+# Extract it later
+urd get apple.auth_key -e prod --out-file ./AuthKey.p8
+```
+
+In the store YAML, file items look like any other item with an extra `encoding` field:
+
+```yaml
+apple.auth_key:
+  description: Apple Sign-In auth key
+  sensitivity: secret
+  encoding: base64
+  environments: [prod]
+  prod: ENC[aes:secret,base64data...]
+```
+
+In the TUI, file items display a `[file]` badge and show `(file)` instead of the raw encoded value. Inline value editing is disabled — use `urd set --in-file` to update file values from the CLI.
+
 ### Sensitivity levels
 
 | Level | Stored as | Behavior |
@@ -454,7 +479,9 @@ urd init [-e <env> ...]                      Initialize urd for this project
 urd set                                      Interactive provisioning
 urd set <id> -e <env> <value>                Set a value
 urd set <id> -e <env> --secret <value>       Set an encrypted value
+urd set <id> -e <env> --in-file <path>       Set value from a file (base64-encoded)
 urd get <id> [-e <env>] [--reveal]           Get a value
+urd get <id> -e <env> --out-file <path>      Extract a file-encoded value to disk
 urd list [-e <env>] [-t <tag>] [--reveal]    List items
 urd remove <id>                              Remove an item
 urd import <path> -e <env> [--secret] [--skip-existing]  Bulk import from file or stdin
