@@ -610,6 +610,22 @@ impl App {
 
     /// Enter edit-value mode for any row that has an environment (`EnvValue` or `MissingEnv`).
     pub fn initiate_edit_value_any(&mut self) {
+        // Check if the item under cursor is file-encoded
+        let is_file_encoded = match self.selected_row() {
+            Some(Row::EnvValue(id, _) | Row::MissingEnv(id, _)) => self
+                .store
+                .get(id.as_str())
+                .is_some_and(|item| {
+                    item.encoding.as_ref() == Some(&crate::store::types::Encoding::Base64)
+                }),
+            _ => false,
+        };
+        if is_file_encoded {
+            self.status_message =
+                Some("File-encoded values cannot be edited inline; use `urd set --in-file`".into());
+            return;
+        }
+
         match self.selected_row() {
             Some(Row::EnvValue(_, _)) => self.initiate_edit_value(),
             Some(Row::MissingEnv(id, env)) => {
@@ -630,6 +646,15 @@ impl App {
         };
         let id = id.clone();
         let env = env.clone();
+
+        // File-encoded items can't be edited inline
+        if let Some(item) = self.store.get(&id)
+            && item.encoding.as_ref() == Some(&crate::store::types::Encoding::Base64)
+        {
+            self.status_message =
+                Some("File-encoded values cannot be edited inline; use `urd set --in-file`".into());
+            return;
+        }
 
         // Get the current value, decrypting if needed
         let current = self

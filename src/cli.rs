@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 use crate::store::types::Sensitivity;
@@ -102,6 +104,9 @@ pub struct SetArgs {
     /// Encrypt as secret
     #[arg(long)]
     pub secret: bool,
+    /// Read value from a file (stored as base64)
+    #[arg(long, conflicts_with = "value")]
+    pub in_file: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -114,6 +119,9 @@ pub struct GetArgs {
     /// Reveal encrypted values as plaintext
     #[arg(short, long)]
     pub reveal: bool,
+    /// Decode and write value to a file (for base64-encoded items)
+    #[arg(long)]
+    pub out_file: Option<PathBuf>,
 }
 
 #[derive(Parser)]

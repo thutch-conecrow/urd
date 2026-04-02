@@ -1,4 +1,8 @@
-use anyhow::{Context, Result};
+use std::fs;
+
+use anyhow::{Context, Result, bail};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use dialoguer::{Input, Select};
 
 use crate::cli::{GetArgs, ListArgs, RemoveArgs, SetArgs};
@@ -6,12 +10,20 @@ use crate::crypto;
 use crate::crypto::SensitivityLevel;
 
 use super::paths::store_path;
-use super::types::{Sensitivity, apply_default_environments, load_store, save_store};
+use super::types::{Encoding, Sensitivity, apply_default_environments, load_store, save_store};
 
 #[allow(clippy::too_many_lines)]
 pub fn set(mut args: SetArgs) -> Result<()> {
     let path = store_path()?;
     let mut store = load_store(&path)?;
+
+    // Resolve value: either --in-file (base64-encoded file contents) or positional value
+    let is_file = args.in_file.is_some();
+    if let Some(ref file_path) = args.in_file {
+        let bytes = fs::read(file_path)
+            .with_context(|| format!("could not read file {}", file_path.display()))?;
+        args.value = Some(BASE64.encode(&bytes));
+    }
 
     if let (Some(id), Some(value), false) =
         (args.id.as_deref(), args.value.as_deref(), args.env.is_empty())
@@ -32,6 +44,9 @@ pub fn set(mut args: SetArgs) -> Result<()> {
         let item = store.entry(id.clone()).or_default();
         for env in &args.env {
             item.values.insert(env.clone(), stored_value.clone());
+        }
+        if is_file {
+            item.encoding = Some(Encoding::Base64);
         }
         apply_default_environments(&meta, item);
         save_store(&path, &store)?;
@@ -201,6 +216,42 @@ pub fn get(args: &GetArgs) -> Result<()> {
     let item = store
         .get(&args.id)
         .with_context(|| format!("item '{}' not found", args.id))?;
+
+    let is_base64 = item.encoding.as_ref() == Some(&Encoding::Base64);
+
+    // --out-file requires a single environment and implies --reveal for encrypted items
+    if let Some(ref out_path) = args.out_file {
+        if !is_base64 {
+            bail!("item '{}' is not file-encoded (no encoding: base64); use `get` without --out-file", args.id);
+        }
+
+        let envs: Vec<&String> = if args.env.is_empty() {
+            item.values.keys().collect()
+        } else {
+            args.env.iter().collect()
+        };
+        if envs.len() != 1 {
+            bail!("--out-file requires exactly one environment (found {}); use -e to pick one", envs.len());
+        }
+
+        let value = item
+            .values
+            .get(envs[0].as_str())
+            .with_context(|| format!("no value for env '{}'", envs[0]))?;
+
+        let plain = if crypto::parse_sensitivity(value).is_some() {
+            crypto::decrypt_value(value)?
+        } else {
+            value.clone()
+        };
+
+        let bytes = BASE64.decode(&plain)
+            .context("failed to base64-decode value")?;
+        fs::write(out_path, &bytes)
+            .with_context(|| format!("could not write {}", out_path.display()))?;
+        println!("Wrote {} bytes to {}", bytes.len(), out_path.display());
+        return Ok(());
+    }
 
     let envs_to_show: Vec<&String> = if args.env.is_empty() {
         item.values.keys().collect()
